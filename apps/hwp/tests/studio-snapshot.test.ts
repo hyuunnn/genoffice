@@ -45,8 +45,7 @@ describe('studio snapshot helpers', () => {
   })
 
   it('keeps file:new-doc and print registered in embed so the host can create and print', () => {
-    const stock =
-      'bA.registerAll(yA===`embed`?Ev.filter(e=>!sD.includes(e.id)):Ev),file:new-doc'
+    const stock = 'bA.registerAll(yA===`embed`?Ev.filter(e=>!sD.includes(e.id)):Ev),file:new-doc'
     const next = keepEmbedNewDoc(stock)
     expect(hasEmbedNewDoc(next)).toBe(true)
     expect(hasEmbedPrint(next)).toBe(true)
@@ -126,7 +125,9 @@ describe('studio snapshot helpers', () => {
     expect(exposePrepareTextCommand(next)).toBe(next)
     const methodsStart = next.indexOf('/*genoffice-prepare-text-v7*/')
     const methodsEnd = next.indexOf('async applyTextCommand', methodsStart)
-    expect(() => new Function(`return class { ${next.slice(methodsStart, methodsEnd)} }`)).not.toThrow()
+    expect(
+      () => new Function(`return class { ${next.slice(methodsStart, methodsEnd)} }`),
+    ).not.toThrow()
   })
 
   it('restores the insertFilled handler comma that blanks the studio', () => {
@@ -164,7 +165,9 @@ describe('studio snapshot helpers', () => {
     expect(next).not.toContain('a&&a.paraIdx??t')
     const methodsStart = next.indexOf('/*genoffice-prepare-text-v7*/')
     const methodsEnd = next.indexOf('async applyTextCommand', methodsStart)
-    expect(() => new Function(`return class { ${next.slice(methodsStart, methodsEnd)} }`)).not.toThrow()
+    expect(
+      () => new Function(`return class { ${next.slice(methodsStart, methodsEnd)} }`),
+    ).not.toThrow()
   })
 
   it('stringifies format payloads so WASM does not trap', () => {

@@ -155,8 +155,7 @@ function tableAgentMethods() {
 }
 
 /** A missing `}` here leaves listBodyParagraphs inside prepareTextCommand — blank Hangul page. */
-const UNCLOSED_PREPARE_RE =
-  /selectionEnd:i\}\}listBodyParagraphs\(\)\{this\.syncGeneration\(\)/
+const UNCLOSED_PREPARE_RE = /selectionEnd:i\}\}listBodyParagraphs\(\)\{this\.syncGeneration\(\)/
 
 function closePrepareTextCommand(js) {
   return js.replace(
@@ -177,14 +176,10 @@ function repairIllegalNullishMix(js) {
  * insertFilled handler (`}async insertFilled…{if(await`). That is
  * `Unexpected token 'async'` — blank Hangul page, AI never becomes ready.
  */
-const STRIPPED_FILLED_HANDLER_RE =
-  /\}async insertFilledParagraphs\(e,t,n\)\{if\(await /g
+const STRIPPED_FILLED_HANDLER_RE = /\}async insertFilledParagraphs\(e,t,n\)\{if\(await /g
 
 function repairStrippedFilledHandlerComma(js) {
-  return js.replace(
-    STRIPPED_FILLED_HANDLER_RE,
-    '},async insertFilledParagraphs(e,t,n){if(await ',
-  )
+  return js.replace(STRIPPED_FILLED_HANDLER_RE, '},async insertFilledParagraphs(e,t,n){if(await ')
 }
 
 /** WASM apply*Format encodes a JSON string; a raw object traps as OOB. */
@@ -310,12 +305,21 @@ function prepareAgentRoutes(guard, params, host) {
 
 function stripClassMethodCommas(js) {
   return js
-    .replace(/,listBodyParagraphs\(\)\{this\.syncGeneration\(\)/g, 'listBodyParagraphs(){this.syncGeneration()')
+    .replace(
+      /,listBodyParagraphs\(\)\{this\.syncGeneration\(\)/g,
+      'listBodyParagraphs(){this.syncGeneration()',
+    )
     .replace(/,listFields\(\)\{this\.syncGeneration\(\)/g, 'listFields(){this.syncGeneration()')
     .replace(/,setField\(e,t\)\{this\.syncGeneration\(\)/g, 'setField(e,t){this.syncGeneration()')
     .replace(/,listTables\(\)\{this\.syncGeneration\(\)/g, 'listTables(){this.syncGeneration()')
-    .replace(/,replaceCell\(e,t,n,r,i\)\{this\.syncGeneration\(\)/g, 'replaceCell(e,t,n,r,i){this.syncGeneration()')
-    .replace(/,insertBodyParagraphs\(e,t,n\)\{this\.syncGeneration\(\)/g, 'insertBodyParagraphs(e,t,n){this.syncGeneration()')
+    .replace(
+      /,replaceCell\(e,t,n,r,i\)\{this\.syncGeneration\(\)/g,
+      'replaceCell(e,t,n,r,i){this.syncGeneration()',
+    )
+    .replace(
+      /,insertBodyParagraphs\(e,t,n\)\{this\.syncGeneration\(\)/g,
+      'insertBodyParagraphs(e,t,n){this.syncGeneration()',
+    )
     .replace(
       /,async insertFilledParagraphs\(e,t,n\)\{if\(!Array\.isArray/g,
       'async insertFilledParagraphs(e,t,n){if(!Array.isArray',
@@ -330,7 +334,10 @@ function stripClassMethodCommas(js) {
     .replace(/,deleteTableRow\(e,t,n,r\)\{/g, 'deleteTableRow(e,t,n,r){')
     .replace(/,deleteTableColumn\(e,t,n,r\)\{/g, 'deleteTableColumn(e,t,n,r){')
     .replace(/,mergeTableCells\(e,t,n,r,i,a,o\)\{/g, 'mergeTableCells(e,t,n,r,i,a,o){')
-    .replace(/,splitTableCellInto\(e,t,n,r,i,a,o,s,c\)\{/g, 'splitTableCellInto(e,t,n,r,i,a,o,s,c){')
+    .replace(
+      /,splitTableCellInto\(e,t,n,r,i,a,o,s,c\)\{/g,
+      'splitTableCellInto(e,t,n,r,i,a,o,s,c){',
+    )
     .replace(/,setCellProperties\(e,t,n,r,i\)\{/g, 'setCellProperties(e,t,n,r,i){')
     .replace(/,setTableProperties\(e,t,n,r\)\{/g, 'setTableProperties(e,t,n,r){')
     .replace(/,getTableProperties\(e,t,n\)\{/g, 'getTableProperties(e,t,n){')
@@ -388,7 +395,10 @@ const INSERT_BODY_ROUTE_END_RE =
 
 function attachFillSurface(js) {
   let next = stripClassMethodCommas(js.replace(PREPARE_TEXT_V4_MARK, PREPARE_TEXT_V5_MARK))
-  next = next.replace(INSERT_BODY_CLASS_END_RE, `${insertBodyMethod()}${insertFilledMethod()}async applyTextCommand`)
+  next = next.replace(
+    INSERT_BODY_CLASS_END_RE,
+    `${insertBodyMethod()}${insertFilledMethod()}async applyTextCommand`,
+  )
   next = next.replace(INSERT_BODY_HANDLER_END_RE, (_, ready, agent) => {
     return `async insertBodyParagraphs(e,t,n){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.insertBodyParagraphs(e,t,n)},async insertFilledParagraphs(e,t,n){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.insertFilledParagraphs(e,t,n)},async applyTextCommand(`
   })
@@ -514,7 +524,9 @@ export function exposePrepareTextCommand(js) {
                 attachTableEditSurface(
                   attachCellFormatSurface(
                     attachFontSurface(
-                      attachFormatSurface(attachFillSurface(attachInsertSurface(attachTableSurface(closed)))),
+                      attachFormatSurface(
+                        attachFillSurface(attachInsertSurface(attachTableSurface(closed))),
+                      ),
                     ),
                   ),
                 ),
@@ -531,7 +543,9 @@ export function exposePrepareTextCommand(js) {
       upgraded.includes('a&&a.paraIdx??t') ||
       upgraded.includes('}async insertFilledParagraphs(e,t,n){if(await')
     ) {
-      throw new Error('rhwp-studio prepareTextCommand surface changed — update exposePrepareTextCommand()')
+      throw new Error(
+        'rhwp-studio prepareTextCommand surface changed — update exposePrepareTextCommand()',
+      )
     }
     if (
       closed.includes('applyParaFormat(e,t,JSON.stringify(r))') &&
@@ -549,25 +563,38 @@ export function exposePrepareTextCommand(js) {
     return upgraded
   }
   const snap = js.match(PREPARE_SNAP_RE)
-  if (!snap) throw new Error('rhwp-studio paragraph snapshot helper changed — update exposePrepareTextCommand()')
+  if (!snap)
+    throw new Error(
+      'rhwp-studio paragraph snapshot helper changed — update exposePrepareTextCommand()',
+    )
   const methods = prepareAgentMethods(snap[1])
   let next = js
   if (PREPARE_V1_CLASS_RE.test(next)) {
     next = next.replace(PREPARE_V1_CLASS_RE, `${methods}async applyTextCommand($1){`)
   } else {
-    next = next.replace(PREPARE_CLASS_RE, `selectedTextSha256:$1}}${methods}async applyTextCommand($2){`)
+    next = next.replace(
+      PREPARE_CLASS_RE,
+      `selectedTextSha256:$1}}${methods}async applyTextCommand($2){`,
+    )
   }
   next = next.replace(PREPARE_HANDLER_RE, (_, ready, agent) => prepareAgentHandlers(ready, agent))
-  if (next.includes('async prepareTextCommand(){if(await') && !next.includes('async listBodyParagraphs(){if(await')) {
+  if (
+    next.includes('async prepareTextCommand(){if(await') &&
+    !next.includes('async listBodyParagraphs(){if(await')
+  ) {
     next = next.replace(
       /async prepareTextCommand\(\)\{if\(await ([A-Za-z_$][\w$]*),!([A-Za-z_$][\w$]*)\)throw Error\(`Document agent is not initialized`\);return \2\.prepareTextCommand\(\)\},async applyTextCommand\(/,
       (_, ready, agent) =>
         `async prepareTextCommand(){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.prepareTextCommand()},async listBodyParagraphs(){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.listBodyParagraphs()},async listFields(){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.listFields()},async setField(e,t){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.setField(e,t)},async listTables(){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.listTables()},async replaceCell(e,t,n,r,i){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.replaceCell(e,t,n,r,i)},${insertHandler(ready, agent)},async applyTextCommand(`,
     )
   }
-  next = next.replace(PREPARE_ROUTE_RE, (_, guard, params, host) => prepareAgentRoutes(guard, params, host))
+  next = next.replace(PREPARE_ROUTE_RE, (_, guard, params, host) =>
+    prepareAgentRoutes(guard, params, host),
+  )
   if (PREPARE_V1_ROUTE_RE.test(next) && !next.includes('case`listBodyParagraphs`')) {
-    next = next.replace(PREPARE_V1_ROUTE_RE, (_, guard, params, host) => prepareAgentRoutes(guard, params, host))
+    next = next.replace(PREPARE_V1_ROUTE_RE, (_, guard, params, host) =>
+      prepareAgentRoutes(guard, params, host),
+    )
   }
   if (
     !next.includes(PREPARE_TEXT_V7_MARK) ||
@@ -589,7 +616,9 @@ export function exposePrepareTextCommand(js) {
     next.includes('a&&a.paraIdx??t') ||
     next.includes('}async insertFilledParagraphs(e,t,n){if(await')
   ) {
-    throw new Error('rhwp-studio prepareTextCommand surface changed — update exposePrepareTextCommand()')
+    throw new Error(
+      'rhwp-studio prepareTextCommand surface changed — update exposePrepareTextCommand()',
+    )
   }
   return next
 }

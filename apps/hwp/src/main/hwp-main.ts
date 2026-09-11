@@ -181,45 +181,42 @@ function registerHwpIpc(): void {
     return await readFile(path)
   })
 
-  ipcMain.handle(
-    HWP_CHANNELS.save,
-    async (e, request: SaveHwpRequest): Promise<SaveHwpResult> => {
-      const waiter = saveWaiters.get(e.sender.id)
-      saveWaiters.delete(e.sender.id)
-      const done = (result: SaveHwpResult): SaveHwpResult => {
-        waiter?.(result.ok && !('canceled' in result))
-        return result
-      }
-      const hwp = asNodeBuffer(request?.hwp)
-      const hwpx = asNodeBuffer(request?.hwpx)
-      if (!hwp || !hwpx) return done({ ok: false, error: 'hwp: bad save request' })
-      const hml = request?.hml !== undefined ? asNodeBuffer(request.hml) : undefined
-      if (request?.hml !== undefined && !hml) {
-        return done({ ok: false, error: 'hwp: bad HML bytes' })
-      }
-      const mode: SaveMode = request.mode === 'saveAs' ? 'saveAs' : 'save'
-      try {
-        const target = await resolveSaveTarget(e, mode, Boolean(hml?.byteLength))
-        if (target === 'canceled') return done({ ok: true, canceled: true })
-        if (!target) return done({ ok: false, error: 'hwp: no save target' })
-        const format = saveFormatForPath(target)
-        const bytes = bytesForSaveFormat(format, {
-          hwp,
-          hwpx,
-          ...(hml ? { hml } : {}),
-        })
-        await atomicWriteFile(target, Buffer.from(bytes))
-        const currentPath = savePathByWc.get(e.sender.id)
-        savePathByWc.set(e.sender.id, target)
-        openPathByWc.set(e.sender.id, target)
-        dirtyByWc.delete(e.sender.id)
-        if (currentPath !== target) fileSavedHook?.(e.sender, target)
-        return done({ ok: true, path: target })
-      } catch (err) {
-        return done({ ok: false, error: err instanceof Error ? err.message : String(err) })
-      }
-    },
-  )
+  ipcMain.handle(HWP_CHANNELS.save, async (e, request: SaveHwpRequest): Promise<SaveHwpResult> => {
+    const waiter = saveWaiters.get(e.sender.id)
+    saveWaiters.delete(e.sender.id)
+    const done = (result: SaveHwpResult): SaveHwpResult => {
+      waiter?.(result.ok && !('canceled' in result))
+      return result
+    }
+    const hwp = asNodeBuffer(request?.hwp)
+    const hwpx = asNodeBuffer(request?.hwpx)
+    if (!hwp || !hwpx) return done({ ok: false, error: 'hwp: bad save request' })
+    const hml = request?.hml !== undefined ? asNodeBuffer(request.hml) : undefined
+    if (request?.hml !== undefined && !hml) {
+      return done({ ok: false, error: 'hwp: bad HML bytes' })
+    }
+    const mode: SaveMode = request.mode === 'saveAs' ? 'saveAs' : 'save'
+    try {
+      const target = await resolveSaveTarget(e, mode, Boolean(hml?.byteLength))
+      if (target === 'canceled') return done({ ok: true, canceled: true })
+      if (!target) return done({ ok: false, error: 'hwp: no save target' })
+      const format = saveFormatForPath(target)
+      const bytes = bytesForSaveFormat(format, {
+        hwp,
+        hwpx,
+        ...(hml ? { hml } : {}),
+      })
+      await atomicWriteFile(target, Buffer.from(bytes))
+      const currentPath = savePathByWc.get(e.sender.id)
+      savePathByWc.set(e.sender.id, target)
+      openPathByWc.set(e.sender.id, target)
+      dirtyByWc.delete(e.sender.id)
+      if (currentPath !== target) fileSavedHook?.(e.sender, target)
+      return done({ ok: true, path: target })
+    } catch (err) {
+      return done({ ok: false, error: err instanceof Error ? err.message : String(err) })
+    }
+  })
 
   ipcMain.on(HWP_CHANNELS.dirtyChanged, (e, dirty: unknown) => {
     if (dirty === true) dirtyByWc.add(e.sender.id)

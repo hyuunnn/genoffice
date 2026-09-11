@@ -8,13 +8,10 @@ import { startHwpLoopback } from '../src/main/loopback'
 function rawStatus(origin: string, path: string): Promise<number> {
   const url = new URL(origin)
   return new Promise((resolve, reject) => {
-    const req = request(
-      { hostname: url.hostname, port: url.port, path, method: 'GET' },
-      (res) => {
-        res.resume()
-        res.on('end', () => resolve(res.statusCode ?? 0))
-      },
-    )
+    const req = request({ hostname: url.hostname, port: url.port, path, method: 'GET' }, (res) => {
+      res.resume()
+      res.on('end', () => resolve(res.statusCode ?? 0))
+    })
     req.on('error', reject)
     req.end()
   })

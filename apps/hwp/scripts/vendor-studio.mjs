@@ -29,16 +29,7 @@ const OUT = join(SCRIPT_DIR, '..', 'vendor', 'rhwp-studio')
 const PRINT_SURFACE = join(SCRIPT_DIR, 'print-surface.html')
 const ENSURE = process.argv.includes('--ensure')
 
-const TEXT_EXT = new Set([
-  '.html',
-  '.js',
-  '.css',
-  '.json',
-  '.webmanifest',
-  '.svg',
-  '.txt',
-  '.map',
-])
+const TEXT_EXT = new Set(['.html', '.js', '.css', '.json', '.webmanifest', '.svg', '.txt', '.map'])
 
 const BUNDLED_FONTS = [
   'fonts/Cafe24Ssurround-v2.0.woff2',
