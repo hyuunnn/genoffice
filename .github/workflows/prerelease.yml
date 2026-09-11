@@ -2,8 +2,22 @@ name: Pre-release
 
 # Unsigned Mac + Windows installers for the Hangul preview. Official
 # genspark-ai/genoffice releases stay on their private signing pipeline.
+# CI calls this after a green push to main; workflow_dispatch remains for
+# a manual rebuild of the same rolling tag.
 
 on:
+  workflow_call:
+    inputs:
+      version:
+        description: Installer version (also the git tag, with a v prefix)
+        type: string
+        required: false
+        default: '0.9.0-hangul'
+      tag:
+        description: Git tag to create (leave empty to use v<version>)
+        type: string
+        required: false
+        default: ''
   workflow_dispatch:
     inputs:
       version:
@@ -151,6 +165,11 @@ jobs:
             echo "no installer artifacts" >&2
             ls -la dist >&2 || true
             exit 1
+          fi
+          # Rolling preview tag: replace the previous Hangul pre-release so
+          # the download URL stays https://github.com/<repo>/releases/tag/$tag
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release delete "$tag" --yes --cleanup-tag
           fi
           notes="$(cat <<EOF
           Unsigned Hangul preview build from \`${{ github.sha }}\`.

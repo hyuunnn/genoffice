@@ -2,8 +2,9 @@ name: CI
 
 # Test gate for every PR and push: changed-file formatting, lint, typecheck across
 # all workspaces, and the full unit-test suite (engine packages and app tests; the
-# sheets suite also runs the Rust xlsx-sidecar tests). Packaging/signing is handled
-# by separate release automation — this workflow never builds installers.
+# sheets suite also runs the Rust xlsx-sidecar tests). A green push to main then
+# calls Pre-release for unsigned Mac/Windows Hangul preview installers. Official
+# genspark-ai/genoffice signing stays on that repo's private pipeline.
 
 on:
   push:
@@ -186,3 +187,16 @@ jobs:
             e2e/artifacts
             e2e/test-results
           retention-days: 7
+
+  # Unsigned Hangul preview only. Skipped on PRs and non-main branches so a
+  # failing installer build cannot turn a pull-request test run red.
+  prerelease:
+    name: Pre-release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [test, e2e]
+    permissions:
+      contents: write
+    uses: ./.github/workflows/prerelease.yml
+    secrets: inherit
+    with:
+      version: '0.9.0-hangul'
