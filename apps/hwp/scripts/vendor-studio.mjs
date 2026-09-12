@@ -17,6 +17,7 @@ import {
   REQUIRED_RELATIVE,
   StaleSnapshotError,
   assertSnapshotCurrent,
+  hasCurrentMarks,
   isPwaPath,
   exposePrepareTextCommand,
   keepEmbedNewDoc,
@@ -122,33 +123,36 @@ async function stripPwaFiles() {
   await writeFile(index, next)
 }
 
-/** Needle misses are reported and skipped (other assets lack the agent); stale snapshots propagate. */
-function tryStudioPatch(fn, js, label) {
-  try {
-    return fn(js)
-  } catch (err) {
-    if (err instanceof StaleSnapshotError) throw err
-    process.stderr.write(
-      `studio patch skipped (${label}): ${err instanceof Error ? err.message : err}\n`,
-    )
-    return js
-  }
-}
-
-function patchStudioSource(js, label) {
+/**
+ * Chunks without the agent / command registry pass through unchanged. A needle
+ * miss on the agent bundle (upstream drift) or a stale local snapshot throws —
+ * a half-patched bundle must never be reported as ready.
+ */
+function patchStudioSource(js) {
   assertSnapshotCurrent(js)
-  return tryStudioPatch(exposePrepareTextCommand, tryStudioPatch(keepEmbedNewDoc, js, label), label)
+  return exposePrepareTextCommand(keepEmbedNewDoc(js))
 }
 
+/** Returns true when some asset carries every current patch mark. */
 async function patchStudioJs() {
   const dir = join(OUT, 'assets')
-  if (!existsSync(dir)) return
+  if (!existsSync(dir)) return false
+  let patched = false
   for (const name of readdirSync(dir)) {
     if (extname(name) !== '.js') continue
     const path = join(dir, name)
-    const next = patchStudioSource(await readFile(path, 'utf8'), name)
+    const next = patchStudioSource(await readFile(path, 'utf8'))
     await writeFile(path, next)
+    if (hasCurrentMarks(next)) patched = true
   }
+  return patched
+}
+
+function assertPatched(patched) {
+  if (patched) return
+  throw new Error(
+    'rhwp-studio agent bundle was not patched — needles missed; update studio-snapshot.mjs',
+  )
 }
 
 function missingRequired() {
@@ -191,13 +195,14 @@ async function vendor() {
     }
   }
   await stripPwaFiles()
-  await patchStudioJs()
+  const patched = await patchStudioJs()
   await ensurePrintHtml()
   const missing = missingRequired()
   if (missing.length || failed.length) {
     const details = [...missing.map((rel) => `missing ${rel}`), ...failed]
     throw new Error(`rhwp-studio vendor failed:\n${details.join('\n')}`)
   }
+  assertPatched(patched)
   process.stdout.write(`vendored ${seen.size} files → ${OUT}\n`)
 }
 
@@ -205,9 +210,10 @@ async function main() {
   if (ENSURE) {
     await stripPwaFiles()
     // A stale local snapshot is never migrated in place; the error names the re-vendor command.
-    await patchStudioJs()
+    const patched = await patchStudioJs()
     await ensurePrintHtml()
     if (isComplete()) {
+      assertPatched(patched)
       process.stdout.write(`rhwp-studio snapshot ready → ${OUT}\n`)
       return
     }
@@ -215,4 +221,9 @@ async function main() {
   await vendor()
 }
 
-await main()
+try {
+  await main()
+} catch (err) {
+  process.stderr.write(`${err instanceof StaleSnapshotError ? err.message : err}\n`)
+  process.exit(1)
+}

@@ -27,6 +27,8 @@ changes, restart `npm run dev`. Blank pane: `node apps/hwp/scripts/vendor-studio
 The patch is written against the **pristine** upstream bundle only. A snapshot
 is pristine, current, or stale; `--ensure` never migrates a stale one in place —
 it throws `StaleSnapshotError` naming `npm run vendor:studio -w @genoffice/hwp`.
+A needle miss on the agent bundle (upstream drift) also fails `--ensure` and
+`vendor` — a snapshot is only "ready" when every current mark is present.
 After changing `studio-snapshot.mjs`, re-vendor; do not add in-place `repair*` /
 `attach*` upgrade paths. Tests run against
 `apps/hwp/tests/fixtures/rhwp-0.8.6-agent-excerpt.txt` (real bundle windows).

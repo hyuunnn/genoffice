@@ -53,9 +53,9 @@ export const en = {
   aiToolSetPageDone: 'Updated the page',
   aiToolReadDocument: 'Read document text',
   aiToolReadSelection: 'Read selection',
-  aiToolListParagraphs: 'Listed paragraphs',
-  aiToolListFields: 'Listed fields',
-  aiToolListTables: 'Listed tables',
+  aiToolListParagraphs: 'List paragraphs',
+  aiToolListFields: 'List fields',
+  aiToolListTables: 'List tables',
   saveErrorDismiss: 'Dismiss',
   hmlUnavailable: 'This document cannot be saved as HML.',
 } satisfies Record<keyof typeof zh, string>

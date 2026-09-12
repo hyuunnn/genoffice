@@ -10,6 +10,7 @@ import {
   StaleSnapshotError,
   assertSnapshotCurrent,
   exposePrepareTextCommand,
+  hasCurrentMarks,
   hasEmbedNewDoc,
   hasEmbedPrint,
   hasPrepareTextCommand,
@@ -100,42 +101,21 @@ describe('studio snapshot helpers', () => {
     expect(snap).toBeTruthy()
     expect(next).toContain(`${snap}(this.deps.wasm,e.target)`)
     expect(next).toContain('selectionStart')
-    // handlers: guarded async wrappers with object-literal commas
-    expect(next).toMatch(/\},async insertFilledParagraphs\(e,t,n\)\{if\(await /)
-    expect(next).toMatch(/\},async setColumnDef\(e,t,n,r,i\)\{if\(await [\w$]+,![\w$]+\)/)
-    // routes: every RPC the host calls through studio._request
-    for (const rpc of [
-      'prepareTextCommand',
-      'listBodyParagraphs',
-      'listFields',
-      'setField',
-      'listTables',
-      'replaceCell',
-      'insertBodyParagraphs',
-      'insertFilledParagraphs',
-      'insertTable',
-      'applyBodyCharFormat',
-      'applyBodyParaFormat',
-      'applyCellCharFormat',
-      'applyCellParaFormat',
-      'insertTableRow',
-      'mergeTableCells',
-      'splitTableCellInto',
-      'setCellProperties',
-      'setTableProperties',
-      'getPageDef',
-      'setPageDef',
-      'getColumnDef',
-      'setColumnDef',
-    ]) {
-      expect(next).toContain(`case\`${rpc}\`:`)
-    }
+    // handlers: guarded async wrappers, comma-joined into the handler object literal
+    const handlersStart = next.indexOf('async getSelectionContext(){if(await ')
+    const handlersEnd = next.indexOf('async applyTextCommand(', handlersStart)
+    expect(handlersStart).toBeGreaterThan(-1)
+    expect(handlersEnd).toBeGreaterThan(handlersStart)
+    const handlers = next.slice(handlersStart, handlersEnd).replace(/,\s*$/, '')
+    expect(() => new Function(`return { ${handlers} }`)).not.toThrow()
+    // routes: prepareSurfaceComplete already checked every `case` — the chain must still end at applyTextCommand
+    expect(next).toContain('case`setColumnDef`:')
     expect(next).toContain('case`applyTextCommand`:')
   })
 
   it('injects class members without separating commas', () => {
     const body = classBodyOf(exposePrepareTextCommand(STOCK))
-    expect(body).not.toMatch(/\},[a-zA-Z]+\(/)
+    expect(body).not.toMatch(/\},(?:async )?[\w$]+\(/)
     expect(() => new Function(`return class { ${body} }`)).not.toThrow()
   })
 
@@ -160,10 +140,17 @@ describe('studio snapshot helpers', () => {
     expect(() => assertSnapshotCurrent(once)).not.toThrow()
   })
 
-  it('fails loudly when the document-agent surface is no longer in the bundle', () => {
-    expect(() => exposePrepareTextCommand('getSelectionContext applyTextCommand')).toThrow(
-      'paragraph snapshot helper changed',
-    )
+  it('fails loudly when the agent bundle no longer has the snapshot helper', () => {
+    const drifted = STOCK.replace(/try\{[A-Za-z_$][\w$]*\(this\.deps\.wasm,i\)/, 'try{snap(i)')
+    expect(drifted).toContain('`Document agent is not initialized`')
+    expect(() => exposePrepareTextCommand(drifted)).toThrow('paragraph snapshot helper changed')
+  })
+
+  it('passes chunks that do not host the document agent through unchanged', () => {
+    const chunk = 'export const theme=1;getSelectionContext applyTextCommand'
+    expect(exposePrepareTextCommand(chunk)).toBe(chunk)
+    expect(hasCurrentMarks(chunk)).toBe(false)
+    expect(hasCurrentMarks(patchAll(STOCK))).toBe(true)
   })
 
   it('fails loudly when only some patch sites match', () => {

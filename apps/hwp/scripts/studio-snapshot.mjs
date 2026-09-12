@@ -232,11 +232,20 @@ export function prepareSurfaceComplete(js) {
   return COMPLETE_NEEDLES.every((needle) => js.includes(needle))
 }
 
+/** True once every patch this script emits has landed in `js`. */
+export function hasCurrentMarks(js) {
+  return [...CURRENT_MARKS].every((mark) => js.includes(mark))
+}
+
+/** Only the bundle that hosts the document agent gets patched; other chunks pass through. */
+const AGENT_BUNDLE_NEEDLE = '`Document agent is not initialized`'
+
 export function exposePrepareTextCommand(js) {
   if (prepareSurfaceComplete(js)) return js
   if (js.includes(PREPARE_TEXT_MARK)) {
     throw new StaleSnapshotError('prepareTextCommand surface is incomplete')
   }
+  if (!js.includes(AGENT_BUNDLE_NEEDLE)) return js
   const snap = js.match(PREPARE_SNAP_RE)
   if (!snap) {
     throw new Error(
