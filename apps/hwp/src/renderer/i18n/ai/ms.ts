@@ -51,4 +51,11 @@ export const ms = {
   aiToolStyleTableDone: 'Gaya jadual digunakan',
   aiToolSetPage: 'Tetapkan halaman',
   aiToolSetPageDone: 'Halaman ditetapkan',
+  aiToolReadDocument: 'Teks dokumen dibaca',
+  aiToolReadSelection: 'Pilihan dibaca',
+  aiToolListParagraphs: 'Perenggan disenaraikan',
+  aiToolListFields: 'Medan disenaraikan',
+  aiToolListTables: 'Jadual disenaraikan',
+  saveErrorDismiss: 'Tutup',
+  hmlUnavailable: 'Dokumen ini tidak boleh disimpan sebagai HML.',
 } satisfies Record<keyof typeof zh, string>

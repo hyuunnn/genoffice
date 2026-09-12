@@ -1,13 +1,8 @@
-/** Extensions rhwp opens. Keep in sync with shell routing and drop-open. */
-export const HWP_EXTENSIONS = ['hwp', 'hwpx', 'hml'] as const
-
-export type HwpExtension = (typeof HWP_EXTENSIONS)[number]
-
+/**
+ * Extensions rhwp opens. Shell routing (`routeDocumentPath`, `OPEN_DIALOG_EXTENSIONS`)
+ * and `packages/electron-utils` `OPENABLE_DOC_RE` list the same three by hand.
+ */
 export const HWP_RE = /\.(hwp|hwpx|hml)$/i
-
-export function isHwpPath(path: string): boolean {
-  return HWP_RE.test(path)
-}
 
 export type HwpSaveFormat = 'hwp' | 'hwpx' | 'hml'
 

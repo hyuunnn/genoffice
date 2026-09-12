@@ -51,4 +51,11 @@ export const ko = {
   aiToolStyleTableDone: '표 모양을 지정했습니다',
   aiToolSetPage: '용지 설정',
   aiToolSetPageDone: '용지를 설정했습니다',
+  aiToolReadDocument: '문서 텍스트 읽기',
+  aiToolReadSelection: '선택 영역 읽기',
+  aiToolListParagraphs: '문단 목록 읽기',
+  aiToolListFields: '누름틀 목록 읽기',
+  aiToolListTables: '표 목록 읽기',
+  saveErrorDismiss: '닫기',
+  hmlUnavailable: '이 문서는 HML로 저장할 수 없습니다.',
 } satisfies Record<keyof typeof zh, string>

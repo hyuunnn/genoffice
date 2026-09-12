@@ -1,4 +1,4 @@
-import type { AgentSkill, AgentToolDef } from '@genoffice/agent-core'
+import type { AgentSkill, AgentToolDef, ToolExecution } from '@genoffice/agent-core'
 import { t } from '../i18n/locale'
 import {
   clipPlainText,
@@ -472,6 +472,79 @@ function hangulReplyClaims(text: string): {
   }
 }
 
+const TABLE_EDIT_ACTIONS = new Set<HangulTableEditAction>([
+  'insert_row',
+  'insert_column',
+  'delete_row',
+  'delete_column',
+  'merge',
+  'split',
+])
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
+
+/**
+ * Run one tool body. `summary` labels the failure row; a body may return its
+ * own success summary (the `…Done` key). Any throw — argument validation or
+ * studio RPC — becomes an isError result the model can read.
+ */
+async function runTool(
+  summary: string,
+  body: () => Promise<Omit<ToolExecution, 'summary'> & { summary?: string }>,
+): Promise<ToolExecution> {
+  try {
+    const result = await body()
+    return { summary, ...result }
+  } catch (err) {
+    return { output: errorMessage(err), isError: true, summary }
+  }
+}
+
+function beforeAfter(result: { before: string; after: string }): string {
+  return `Before:\n${result.before || '(empty)'}\nAfter:\n${result.after || '(empty)'}`
+}
+
+function parseFormatTarget(input: Record<string, unknown>): {
+  index?: number
+  indexes?: number[]
+  cell?: { table: number; row: number; col?: number }
+} {
+  const index = optionalToolIndex(input.index)
+  let indexes: number[] | undefined
+  if (input.indexes != null) {
+    if (!Array.isArray(input.indexes)) throw new Error('indexes must be an array')
+    indexes = input.indexes.map((value, i) => requireToolIndex(value, `indexes[${i}]`))
+  }
+  const table = optionalToolIndex(input.table, 'table')
+  const row = optionalToolIndex(input.row, 'row')
+  const col = optionalToolIndex(input.col, 'col')
+  if (table == null && row == null && col == null) return { index, indexes }
+  if (table == null) throw new Error('table must be an integer')
+  if (row == null) throw new Error('row must be an integer')
+  if (index != null || indexes != null) throw new Error('do not mix table/row with index/indexes')
+  return { cell: { table, row, col } }
+}
+
+function parseFormatSpec(input: Record<string, unknown>): HangulFormatSpec {
+  const format: HangulFormatSpec = {}
+  if (typeof input.bold === 'boolean') format.bold = input.bold
+  if (typeof input.italic === 'boolean') format.italic = input.italic
+  if (typeof input.underline === 'boolean') format.underline = input.underline
+  if (typeof input.strikethrough === 'boolean') format.strikethrough = input.strikethrough
+  if (input.fontSize != null) format.fontSize = Number(input.fontSize)
+  if (typeof input.color === 'string') format.color = input.color
+  if (typeof input.font === 'string') format.font = input.font
+  if (input.lineSpacing != null) format.lineSpacing = Number(input.lineSpacing)
+  if (input.indentLeft != null) format.indentLeft = Number(input.indentLeft)
+  if (input.indentRight != null) format.indentRight = Number(input.indentRight)
+  if (input.indentFirstLine != null) format.indentFirstLine = Number(input.indentFirstLine)
+  if (typeof input.align === 'string') format.align = input.align as HangulFormatSpec['align']
+  if (typeof input.list === 'string') format.list = input.list as HangulFormatSpec['list']
+  return format
+}
+
 function formatTables(tables: HangulTable[]): string {
   if (tables.length === 0) return '(no tables)'
   return tables
@@ -514,386 +587,180 @@ export function createHangulSkill(getDeps: () => HangulSkillDeps): AgentSkill {
     },
     executeTool: async (call) => {
       const deps = getDeps()
-      if (call.name === 'get_document_text') {
-        try {
-          const text = await deps.getDocumentText()
-          return {
-            output: text || '(empty document)',
-            summary: 'Read document text',
-          }
-        } catch (err) {
-          return {
-            output: err instanceof Error ? err.message : String(err),
-            isError: true,
-            summary: 'Read document text',
-          }
-        }
-      }
-      if (call.name === 'get_selection') {
-        try {
-          const text = await deps.getSelection()
-          if (!text?.trim()) {
-            return { output: '(no selection)', summary: 'Read selection' }
-          }
-          return { output: clipPlainText(text), summary: 'Read selection' }
-        } catch (err) {
-          return {
-            output: err instanceof Error ? err.message : String(err),
-            isError: true,
-            summary: 'Read selection',
-          }
-        }
-      }
-      if (call.name === 'get_paragraphs') {
-        try {
-          const items = await deps.listParagraphs()
-          return { output: formatParagraphs(items), summary: 'Listed paragraphs' }
-        } catch (err) {
-          return {
-            output: err instanceof Error ? err.message : String(err),
-            isError: true,
-            summary: 'Listed paragraphs',
-          }
-        }
-      }
-      if (call.name === 'insert_content') {
-        const text = String(call.input.text ?? '')
-        let afterIndex: number | undefined
-        try {
-          afterIndex = optionalToolIndex(call.input.afterIndex, 'afterIndex')
-        } catch (err) {
-          return {
-            output: err instanceof Error ? err.message : String(err),
-            isError: true,
-            summary: t('aiToolInsertContent'),
-          }
-        }
-        try {
-          const result = await deps.insertContent(text, afterIndex)
-          return {
-            output: `Inserted ${result.count} paragraph(s) starting at [${result.start}]. The text you passed is already in the document. Do not call insert_content again unless the user asked for more content. Title/heading styles: apply_format on [${result.start}] (skip locked rows such as index 0).`,
-            mutated: true,
-            summary: t('aiToolInsertContentDone'),
-          }
-        } catch (err) {
-          return {
-            output: err instanceof Error ? err.message : String(err),
-            isError: true,
-            summary: t('aiToolInsertContent'),
-          }
-        }
-      }
-      if (call.name === 'replace_paragraph') {
-        const text = String(call.input.text ?? '')
-        let index: number | undefined
-        try {
-          index = optionalToolIndex(call.input.index)
-        } catch (err) {
-          return {
-            output: err instanceof Error ? err.message : String(err),
-            isError: true,
-            summary: t('aiToolReplaceParagraph'),
-          }
-        }
-        try {
-          const result = await deps.replaceParagraph(text, index)
-          return {
-            output: `Replaced paragraph${index == null ? '' : ` [${index}]`}.\nBefore:\n${result.before || '(empty)'}\nAfter:\n${result.after || '(empty)'}`,
-            mutated: true,
-            summary: t('aiToolReplaceParagraphDone'),
-          }
-        } catch (err) {
-          return {
-            output: err instanceof Error ? err.message : String(err),
-            isError: true,
-            summary: t('aiToolReplaceParagraph'),
-          }
-        }
-      }
-      if (call.name === 'replace_selection') {
-        const text = String(call.input.text ?? '')
-        try {
-          const result = await deps.replaceSelection(text)
-          return {
-            output: `Replaced selection.\nBefore:\n${result.before || '(empty)'}\nAfter:\n${result.after || '(empty)'}`,
-            mutated: true,
-            summary: t('aiToolReplaceSelectionDone'),
-          }
-        } catch (err) {
-          return {
-            output: err instanceof Error ? err.message : String(err),
-            isError: true,
-            summary: t('aiToolReplaceSelection'),
-          }
-        }
-      }
-      if (call.name === 'get_fields') {
-        try {
-          const fields = await deps.listFields()
-          return { output: formatFields(fields), summary: 'Listed fields' }
-        } catch (err) {
-          return {
-            output: err instanceof Error ? err.message : String(err),
-            isError: true,
-            summary: 'Listed fields',
-          }
-        }
-      }
-      if (call.name === 'set_field') {
-        const name = String(call.input.name ?? '')
-        const value = String(call.input.value ?? '')
-        try {
-          const result = await deps.setField(name, value)
-          return {
-            output: `Set field ${result.name}.\nBefore:\n${result.before || '(empty)'}\nAfter:\n${result.after || '(empty)'}`,
-            mutated: true,
-            summary: t('aiToolSetFieldDone'),
-          }
-        } catch (err) {
-          return {
-            output: err instanceof Error ? err.message : String(err),
-            isError: true,
-            summary: t('aiToolSetField'),
-          }
-        }
-      }
-      if (call.name === 'get_tables') {
-        try {
-          const tables = await deps.listTables()
-          return { output: formatTables(tables), summary: 'Listed tables' }
-        } catch (err) {
-          return {
-            output: err instanceof Error ? err.message : String(err),
-            isError: true,
-            summary: 'Listed tables',
-          }
-        }
-      }
-      if (call.name === 'replace_cell') {
-        const text = String(call.input.text ?? '')
-        let table: number
-        let row: number
-        let col: number
-        try {
-          table = requireToolIndex(call.input.table, 'table')
-          row = requireToolIndex(call.input.row, 'row')
-          col = requireToolIndex(call.input.col, 'col')
-        } catch (err) {
-          return {
-            output: err instanceof Error ? err.message : String(err),
-            isError: true,
-            summary: t('aiToolReplaceCell'),
-          }
-        }
-        try {
-          const result = await deps.replaceCell(table, row, col, text)
-          return {
-            output: `Replaced cell table[${table}] r${row}c${col}.\nBefore:\n${result.before || '(empty)'}\nAfter:\n${result.after || '(empty)'}`,
-            mutated: true,
-            summary: t('aiToolReplaceCellDone'),
-          }
-        } catch (err) {
-          return {
-            output: err instanceof Error ? err.message : String(err),
-            isError: true,
-            summary: t('aiToolReplaceCell'),
-          }
-        }
-      }
-      if (call.name === 'insert_table') {
-        let rows: number
-        let cols: number
-        let afterIndex: number | undefined
-        try {
-          rows = requireToolIndex(call.input.rows, 'rows')
-          cols = requireToolIndex(call.input.cols, 'cols')
-          afterIndex = optionalToolIndex(call.input.afterIndex, 'afterIndex')
-        } catch (err) {
-          return {
-            output: err instanceof Error ? err.message : String(err),
-            isError: true,
-            summary: t('aiToolInsertTable'),
-          }
-        }
-        try {
-          const cells = Array.isArray(call.input.cells) ? (call.input.cells as string[][]) : undefined
-          const result = await deps.insertTable(rows, cols, cells, afterIndex)
-          const leftover = !cells
-            ? ' Table is empty because cells[][] was omitted. Insert again only if the user asked for another table; otherwise leave it and tell the user the grid is blank. Do not fire one replace_cell per cell.'
-            : result.unfilled.length === 0
-              ? ' Cells were filled in this call. Do not call replace_cell unless a leftover cell is listed.'
-              : result.unfilled.length > 3
-                ? ` ${result.unfilled.length} cells stayed empty. Do not fire one replace_cell per cell. Tell the user the table is there but those cells are blank.`
-                : ` Unfilled cells: ${result.unfilled.join(', ')}. Fill only those leftover cells with replace_cell.`
-          return {
-            output: `Inserted table[${result.table}] ${result.rows}x${result.cols}.${leftover} Do not insert another table unless the user asked for more than one.`,
-            mutated: true,
-            summary: t('aiToolInsertTableDone'),
-          }
-        } catch (err) {
-          return {
-            output: err instanceof Error ? err.message : String(err),
-            isError: true,
-            summary: t('aiToolInsertTable'),
-          }
-        }
-      }
-      if (call.name === 'apply_format') {
-        let index: number | undefined
-        let indexes: number[] | undefined
-        let cell: { table: number; row: number; col?: number } | undefined
-        try {
-          index = optionalToolIndex(call.input.index)
-          if (call.input.indexes != null) {
-            if (!Array.isArray(call.input.indexes)) throw new Error('indexes must be an array')
-            indexes = call.input.indexes.map((value, i) => requireToolIndex(value, `indexes[${i}]`))
-          }
-          const table = optionalToolIndex(call.input.table, 'table')
-          const row = optionalToolIndex(call.input.row, 'row')
-          const col = optionalToolIndex(call.input.col, 'col')
-          if (table != null || row != null || col != null) {
-            if (table == null) throw new Error('table must be an integer')
-            if (row == null) throw new Error('row must be an integer')
-            if (index != null || indexes != null) {
-              throw new Error('do not mix table/row with index/indexes')
+      const { input } = call
+      switch (call.name) {
+        case 'get_document_text':
+          return runTool(t('aiToolReadDocument'), async () => ({
+            output: (await deps.getDocumentText()) || '(empty document)',
+          }))
+        case 'get_selection':
+          return runTool(t('aiToolReadSelection'), async () => {
+            const text = await deps.getSelection()
+            return { output: text?.trim() ? clipPlainText(text) : '(no selection)' }
+          })
+        case 'get_paragraphs':
+          return runTool(t('aiToolListParagraphs'), async () => ({
+            output: formatParagraphs(await deps.listParagraphs()),
+          }))
+        case 'get_fields':
+          return runTool(t('aiToolListFields'), async () => ({
+            output: formatFields(await deps.listFields()),
+          }))
+        case 'get_tables':
+          return runTool(t('aiToolListTables'), async () => ({
+            output: formatTables(await deps.listTables()),
+          }))
+        case 'insert_content':
+          return runTool(t('aiToolInsertContent'), async () => {
+            const afterIndex = optionalToolIndex(input.afterIndex, 'afterIndex')
+            const result = await deps.insertContent(String(input.text ?? ''), afterIndex)
+            return {
+              output: `Inserted ${result.count} paragraph(s) starting at [${result.start}]. The text you passed is already in the document. Do not call insert_content again unless the user asked for more content. Title/heading styles: apply_format on [${result.start}] (skip locked rows such as index 0).`,
+              mutated: true,
+              summary: t('aiToolInsertContentDone'),
             }
-            cell = { table, row, col }
-          }
-        } catch (err) {
-          return {
-            output: err instanceof Error ? err.message : String(err),
-            isError: true,
-            summary: t('aiToolApplyFormat'),
-          }
-        }
-        const format: HangulFormatSpec = {}
-        if (typeof call.input.bold === 'boolean') format.bold = call.input.bold
-        if (typeof call.input.italic === 'boolean') format.italic = call.input.italic
-        if (typeof call.input.underline === 'boolean') format.underline = call.input.underline
-        if (typeof call.input.strikethrough === 'boolean') format.strikethrough = call.input.strikethrough
-        if (call.input.fontSize != null) format.fontSize = Number(call.input.fontSize)
-        if (typeof call.input.color === 'string') format.color = call.input.color
-        if (typeof call.input.font === 'string') format.font = call.input.font
-        if (call.input.lineSpacing != null) format.lineSpacing = Number(call.input.lineSpacing)
-        if (call.input.indentLeft != null) format.indentLeft = Number(call.input.indentLeft)
-        if (call.input.indentRight != null) format.indentRight = Number(call.input.indentRight)
-        if (call.input.indentFirstLine != null) format.indentFirstLine = Number(call.input.indentFirstLine)
-        if (typeof call.input.align === 'string') {
-          format.align = call.input.align as HangulFormatSpec['align']
-        }
-        if (typeof call.input.list === 'string') {
-          format.list = call.input.list as HangulFormatSpec['list']
-        }
-        try {
-          const result = await deps.applyFormat(format, index, indexes, cell)
-          const target =
-            result.table != null && result.row != null
-              ? `table[${result.table}] row ${result.row} cell(s) [${result.indexes.join(', ')}]`
-              : `paragraph(s) [${result.indexes.join(', ')}]`
-          return {
-            output: `Applied ${result.applied.join(', ') || 'format'} to ${target}.`,
-            mutated: true,
-            summary: t('aiToolApplyFormatDone'),
-          }
-        } catch (err) {
-          return {
-            output: err instanceof Error ? err.message : String(err),
-            isError: true,
-            summary: t('aiToolApplyFormat'),
-          }
-        }
+          })
+        case 'replace_paragraph':
+          return runTool(t('aiToolReplaceParagraph'), async () => {
+            const index = optionalToolIndex(input.index)
+            const result = await deps.replaceParagraph(String(input.text ?? ''), index)
+            return {
+              output: `Replaced paragraph${index == null ? '' : ` [${index}]`}.\n${beforeAfter(result)}`,
+              mutated: true,
+              summary: t('aiToolReplaceParagraphDone'),
+            }
+          })
+        case 'replace_selection':
+          return runTool(t('aiToolReplaceSelection'), async () => {
+            const result = await deps.replaceSelection(String(input.text ?? ''))
+            return {
+              output: `Replaced selection.\n${beforeAfter(result)}`,
+              mutated: true,
+              summary: t('aiToolReplaceSelectionDone'),
+            }
+          })
+        case 'set_field':
+          return runTool(t('aiToolSetField'), async () => {
+            const result = await deps.setField(String(input.name ?? ''), String(input.value ?? ''))
+            return {
+              output: `Set field ${result.name}.\n${beforeAfter(result)}`,
+              mutated: true,
+              summary: t('aiToolSetFieldDone'),
+            }
+          })
+        case 'replace_cell':
+          return runTool(t('aiToolReplaceCell'), async () => {
+            const table = requireToolIndex(input.table, 'table')
+            const row = requireToolIndex(input.row, 'row')
+            const col = requireToolIndex(input.col, 'col')
+            const result = await deps.replaceCell(table, row, col, String(input.text ?? ''))
+            return {
+              output: `Replaced cell table[${table}] r${row}c${col}.\n${beforeAfter(result)}`,
+              mutated: true,
+              summary: t('aiToolReplaceCellDone'),
+            }
+          })
+        case 'insert_table':
+          return runTool(t('aiToolInsertTable'), async () => {
+            const rows = requireToolIndex(input.rows, 'rows')
+            const cols = requireToolIndex(input.cols, 'cols')
+            const afterIndex = optionalToolIndex(input.afterIndex, 'afterIndex')
+            const cells = Array.isArray(input.cells) ? (input.cells as string[][]) : undefined
+            const result = await deps.insertTable(rows, cols, cells, afterIndex)
+            const leftover = !cells
+              ? ' Table is empty because cells[][] was omitted. Insert again only if the user asked for another table; otherwise leave it and tell the user the grid is blank. Do not fire one replace_cell per cell.'
+              : result.unfilled.length === 0
+                ? ' Cells were filled in this call. Do not call replace_cell unless a leftover cell is listed.'
+                : result.unfilled.length > 3
+                  ? ` ${result.unfilled.length} cells stayed empty. Do not fire one replace_cell per cell. Tell the user the table is there but those cells are blank.`
+                  : ` Unfilled cells: ${result.unfilled.join(', ')}. Fill only those leftover cells with replace_cell.`
+            return {
+              output: `Inserted table[${result.table}] ${result.rows}x${result.cols}.${leftover} Do not insert another table unless the user asked for more than one.`,
+              mutated: true,
+              summary: t('aiToolInsertTableDone'),
+            }
+          })
+        case 'apply_format':
+          return runTool(t('aiToolApplyFormat'), async () => {
+            const { index, indexes, cell } = parseFormatTarget(input)
+            const result = await deps.applyFormat(parseFormatSpec(input), index, indexes, cell)
+            const target =
+              result.table != null && result.row != null
+                ? `table[${result.table}] row ${result.row} cell(s) [${result.indexes.join(', ')}]`
+                : `paragraph(s) [${result.indexes.join(', ')}]`
+            return {
+              output: `Applied ${result.applied.join(', ') || 'format'} to ${target}.`,
+              mutated: true,
+              summary: t('aiToolApplyFormatDone'),
+            }
+          })
+        case 'edit_table':
+          return runTool(t('aiToolEditTable'), async () => {
+            const action = String(input.action ?? '') as HangulTableEditAction
+            if (!TABLE_EDIT_ACTIONS.has(action)) {
+              throw new Error(
+                'action must be insert_row, insert_column, delete_row, delete_column, merge, or split',
+              )
+            }
+            const result = await deps.editTable({
+              action,
+              table: requireToolIndex(input.table, 'table'),
+              row: optionalToolIndex(input.row, 'row'),
+              col: optionalToolIndex(input.col, 'col'),
+              after: typeof input.after === 'boolean' ? input.after : undefined,
+              endRow: optionalToolIndex(input.endRow, 'endRow'),
+              endCol: optionalToolIndex(input.endCol, 'endCol'),
+              splitRows: optionalToolIndex(input.splitRows, 'splitRows'),
+              splitCols: optionalToolIndex(input.splitCols, 'splitCols'),
+            })
+            return {
+              output: formatEditedTable(result),
+              mutated: true,
+              summary: t('aiToolEditTableDone'),
+            }
+          })
+        case 'style_table':
+          return runTool(t('aiToolStyleTable'), async () => {
+            const spec: HangulTableStyleSpec = {
+              table: requireToolIndex(input.table, 'table'),
+              row: optionalToolIndex(input.row, 'row'),
+              col: optionalToolIndex(input.col, 'col'),
+            }
+            if (typeof input.fill === 'string') spec.fill = input.fill
+            if (typeof input.valign === 'string') spec.valign = input.valign as HangulVAlign
+            if (input.border === false) spec.border = false
+            else if (typeof input.border === 'string') spec.border = input.border
+            if (input.width != null) spec.width = Number(input.width)
+            const result = await deps.styleTable(spec)
+            return {
+              output: `Styled table[${result.table}]: ${result.applied.join(', ')}.`,
+              mutated: true,
+              summary: t('aiToolStyleTableDone'),
+            }
+          })
+        case 'set_page':
+          return runTool(t('aiToolSetPage'), async () => {
+            const spec: HangulPageSetupSpec = {}
+            if (typeof input.orientation === 'string') {
+              spec.orientation = input.orientation as HangulPageSetupSpec['orientation']
+            }
+            if (typeof input.paper === 'string') spec.paper = input.paper as HangulPaper
+            if (input.marginTop != null) spec.marginTop = Number(input.marginTop)
+            if (input.marginBottom != null) spec.marginBottom = Number(input.marginBottom)
+            if (input.marginLeft != null) spec.marginLeft = Number(input.marginLeft)
+            if (input.marginRight != null) spec.marginRight = Number(input.marginRight)
+            if (input.columns != null) spec.columns = Number(input.columns)
+            if (input.columnSpacing != null) spec.columnSpacing = Number(input.columnSpacing)
+            const result = await deps.setPage(spec)
+            return {
+              output: `Set page: ${result.applied.join(', ')}.`,
+              mutated: true,
+              summary: t('aiToolSetPageDone'),
+            }
+          })
+        default:
+          return { output: `Unknown tool: ${call.name}`, isError: true, summary: call.name }
       }
-      if (call.name === 'edit_table') {
-        const actions = new Set<HangulTableEditAction>([
-          'insert_row',
-          'insert_column',
-          'delete_row',
-          'delete_column',
-          'merge',
-          'split',
-        ])
-        try {
-          const action = String(call.input.action ?? '') as HangulTableEditAction
-          if (!actions.has(action)) throw new Error('action must be insert_row, insert_column, delete_row, delete_column, merge, or split')
-          const spec: HangulTableEditSpec = {
-            action,
-            table: requireToolIndex(call.input.table, 'table'),
-            row: optionalToolIndex(call.input.row, 'row'),
-            col: optionalToolIndex(call.input.col, 'col'),
-            after: typeof call.input.after === 'boolean' ? call.input.after : undefined,
-            endRow: optionalToolIndex(call.input.endRow, 'endRow'),
-            endCol: optionalToolIndex(call.input.endCol, 'endCol'),
-            splitRows: optionalToolIndex(call.input.splitRows, 'splitRows'),
-            splitCols: optionalToolIndex(call.input.splitCols, 'splitCols'),
-          }
-          const result = await deps.editTable(spec)
-          return {
-            output: formatEditedTable(result),
-            mutated: true,
-            summary: t('aiToolEditTableDone'),
-          }
-        } catch (err) {
-          return {
-            output: err instanceof Error ? err.message : String(err),
-            isError: true,
-            summary: t('aiToolEditTable'),
-          }
-        }
-      }
-      if (call.name === 'style_table') {
-        try {
-          const spec: HangulTableStyleSpec = {
-            table: requireToolIndex(call.input.table, 'table'),
-            row: optionalToolIndex(call.input.row, 'row'),
-            col: optionalToolIndex(call.input.col, 'col'),
-          }
-          if (typeof call.input.fill === 'string') spec.fill = call.input.fill
-          if (typeof call.input.valign === 'string') spec.valign = call.input.valign as HangulVAlign
-          if (call.input.border === false) spec.border = false
-          else if (typeof call.input.border === 'string') spec.border = call.input.border
-          if (call.input.width != null) spec.width = Number(call.input.width)
-          const result = await deps.styleTable(spec)
-          return {
-            output: `Styled table[${result.table}]: ${result.applied.join(', ')}.`,
-            mutated: true,
-            summary: t('aiToolStyleTableDone'),
-          }
-        } catch (err) {
-          return {
-            output: err instanceof Error ? err.message : String(err),
-            isError: true,
-            summary: t('aiToolStyleTable'),
-          }
-        }
-      }
-      if (call.name === 'set_page') {
-        try {
-          const spec: HangulPageSetupSpec = {}
-          if (typeof call.input.orientation === 'string') {
-            spec.orientation = call.input.orientation as HangulPageSetupSpec['orientation']
-          }
-          if (typeof call.input.paper === 'string') spec.paper = call.input.paper as HangulPaper
-          if (call.input.marginTop != null) spec.marginTop = Number(call.input.marginTop)
-          if (call.input.marginBottom != null) spec.marginBottom = Number(call.input.marginBottom)
-          if (call.input.marginLeft != null) spec.marginLeft = Number(call.input.marginLeft)
-          if (call.input.marginRight != null) spec.marginRight = Number(call.input.marginRight)
-          if (call.input.columns != null) spec.columns = Number(call.input.columns)
-          if (call.input.columnSpacing != null) spec.columnSpacing = Number(call.input.columnSpacing)
-          const result = await deps.setPage(spec)
-          return {
-            output: `Set page: ${result.applied.join(', ')}.`,
-            mutated: true,
-            summary: t('aiToolSetPageDone'),
-          }
-        } catch (err) {
-          return {
-            output: err instanceof Error ? err.message : String(err),
-            isError: true,
-            summary: t('aiToolSetPage'),
-          }
-        }
-      }
-      return { output: `Unknown tool: ${call.name}`, isError: true, summary: call.name }
     },
     verifyResponse: (finalText, executed) => {
       const claims = hangulReplyClaims(finalText)

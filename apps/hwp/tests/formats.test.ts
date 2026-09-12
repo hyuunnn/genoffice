@@ -1,31 +1,23 @@
 import { describe, expect, it } from 'vitest'
 import {
-  HWP_EXTENSIONS,
   HWP_RE,
   HML_UNAVAILABLE,
   bytesForSaveFormat,
   ensureHwpSavePath,
-  isHwpPath,
   saveFormatForPath,
 } from '../src/shared/formats'
 
 describe('HWP_RE', () => {
   it('matches rhwp formats case-insensitively', () => {
-    expect(isHwpPath('/tmp/a.hwp')).toBe(true)
-    expect(isHwpPath('/tmp/a.HWPX')).toBe(true)
-    expect(isHwpPath('C:\\docs\\form.Hml')).toBe(true)
+    expect(HWP_RE.test('/tmp/a.hwp')).toBe(true)
+    expect(HWP_RE.test('/tmp/a.HWPX')).toBe(true)
+    expect(HWP_RE.test('C:\\docs\\form.Hml')).toBe(true)
   })
 
   it('rejects other office formats', () => {
-    expect(isHwpPath('/tmp/a.docx')).toBe(false)
-    expect(isHwpPath('/tmp/a.hwt')).toBe(false)
-    expect(isHwpPath('/tmp/a.hwp.bak')).toBe(false)
-  })
-
-  it('lists the same extensions the regex accepts', () => {
-    for (const ext of HWP_EXTENSIONS) {
-      expect(HWP_RE.test(`file.${ext}`)).toBe(true)
-    }
+    expect(HWP_RE.test('/tmp/a.docx')).toBe(false)
+    expect(HWP_RE.test('/tmp/a.hwt')).toBe(false)
+    expect(HWP_RE.test('/tmp/a.hwp.bak')).toBe(false)
   })
 })
 

@@ -48,4 +48,11 @@ export const zh = {
   aiToolStyleTableDone: '已设置表格外观',
   aiToolSetPage: '设置页面',
   aiToolSetPageDone: '已设置页面',
+  aiToolReadDocument: '读取文档文本',
+  aiToolReadSelection: '读取选区',
+  aiToolListParagraphs: '列出段落',
+  aiToolListFields: '列出字段',
+  aiToolListTables: '列出表格',
+  saveErrorDismiss: '关闭',
+  hmlUnavailable: '此文档无法保存为 HML。',
 }

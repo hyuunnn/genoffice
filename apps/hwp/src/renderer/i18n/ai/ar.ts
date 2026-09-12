@@ -51,4 +51,11 @@ export const ar = {
   aiToolStyleTableDone: 'تم تنسيق الجدول',
   aiToolSetPage: 'إعداد الصفحة',
   aiToolSetPageDone: 'تم إعداد الصفحة',
+  aiToolReadDocument: 'تمت قراءة نص المستند',
+  aiToolReadSelection: 'تمت قراءة التحديد',
+  aiToolListParagraphs: 'تم سرد الفقرات',
+  aiToolListFields: 'تم سرد الحقول',
+  aiToolListTables: 'تم سرد الجداول',
+  saveErrorDismiss: 'إغلاق',
+  hmlUnavailable: 'لا يمكن حفظ هذا المستند بتنسيق HML.',
 } satisfies Record<keyof typeof zh, string>

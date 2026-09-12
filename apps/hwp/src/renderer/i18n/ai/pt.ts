@@ -51,4 +51,11 @@ export const pt = {
   aiToolStyleTableDone: 'Estilo da tabela aplicado',
   aiToolSetPage: 'Configurar página',
   aiToolSetPageDone: 'Página configurada',
+  aiToolReadDocument: 'Texto do documento lido',
+  aiToolReadSelection: 'Seleção lida',
+  aiToolListParagraphs: 'Parágrafos listados',
+  aiToolListFields: 'Campos listados',
+  aiToolListTables: 'Tabelas listadas',
+  saveErrorDismiss: 'Fechar',
+  hmlUnavailable: 'Este documento não pode ser salvo como HML.',
 } satisfies Record<keyof typeof zh, string>

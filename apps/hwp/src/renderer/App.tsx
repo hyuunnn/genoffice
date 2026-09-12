@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AiPanel, GensparkMark } from './ai/AiPanel'
 import { HwpStudio } from './HwpStudio'
 import { useI18n } from './i18n/locale'
@@ -11,10 +11,6 @@ export default function App() {
   const [saveError, setSaveError] = useState<string | null>(null)
   const [studio, setStudio] = useState<HangulStudioFacade | null>(null)
   const [aiOpen, setAiOpen] = useState(() => localStorage.getItem('hwp.showAi') !== '0')
-
-  const markDirty = useCallback((dirty: boolean) => {
-    window.hwpApi.setDirty(dirty)
-  }, [])
 
   useEffect(() => {
     const offRename = window.hwpApi.onFileRenamed(setPath)
@@ -46,7 +42,7 @@ export default function App() {
             className="hwp-save-error-dismiss"
             onClick={() => setSaveError(null)}
           >
-            Dismiss
+            {t('saveErrorDismiss')}
           </button>
         </div>
       )}
@@ -67,7 +63,7 @@ export default function App() {
         <HwpStudio
           path={path}
           onPath={setPath}
-          onDirty={markDirty}
+          onDirty={window.hwpApi.setDirty}
           onError={setError}
           onSaveError={setSaveError}
           onReady={setStudio}

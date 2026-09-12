@@ -52,4 +52,11 @@ export const it = {
   aiToolStyleTableDone: 'Stile tabella applicato',
   aiToolSetPage: 'Imposta pagina',
   aiToolSetPageDone: 'Pagina impostata',
+  aiToolReadDocument: 'Testo del documento letto',
+  aiToolReadSelection: 'Selezione letta',
+  aiToolListParagraphs: 'Paragrafi elencati',
+  aiToolListFields: 'Campi elencati',
+  aiToolListTables: 'Tabelle elencate',
+  saveErrorDismiss: 'Chiudi',
+  hmlUnavailable: 'Questo documento non può essere salvato come HML.',
 } satisfies Record<keyof typeof zh, string>

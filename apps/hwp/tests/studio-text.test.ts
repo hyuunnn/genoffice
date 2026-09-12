@@ -31,7 +31,7 @@ import {
   hasSelection,
   PLAIN_TEXT_MAX_CHARS,
   PLAIN_TEXT_UNAVAILABLE,
-  PARAGRAPH_PREPARE_UNAVAILABLE,
+  invalidRpcResult,
   stripHmlToPlainText,
   type StudioTextSource,
 } from '../src/renderer/studio-text'
@@ -840,7 +840,7 @@ describe('replaceCurrentParagraph', () => {
       ),
     ).rejects.toThrow('listTables missing')
     await expect(listDocumentFields(studio({ _request: async () => ({}) }))).rejects.toThrow(
-      PARAGRAPH_PREPARE_UNAVAILABLE,
+      invalidRpcResult('listFields'),
     )
   })
 

@@ -51,4 +51,11 @@ export const id = {
   aiToolStyleTableDone: 'Gaya tabel diterapkan',
   aiToolSetPage: 'Atur halaman',
   aiToolSetPageDone: 'Halaman diatur',
+  aiToolReadDocument: 'Teks dokumen dibaca',
+  aiToolReadSelection: 'Seleksi dibaca',
+  aiToolListParagraphs: 'Paragraf didaftar',
+  aiToolListFields: 'Bidang didaftar',
+  aiToolListTables: 'Tabel didaftar',
+  saveErrorDismiss: 'Tutup',
+  hmlUnavailable: 'Dokumen ini tidak dapat disimpan sebagai HML.',
 } satisfies Record<keyof typeof zh, string>

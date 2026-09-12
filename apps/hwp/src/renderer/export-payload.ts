@@ -35,12 +35,11 @@ export async function exportStudioPayload(studio: StudioExport): Promise<StudioP
   }
 }
 
-export function hmlUnavailableMessage(blockers?: HmlBlocker[]): string {
+/** `base` is the localized headline; blocker messages come from the studio as-is. */
+export function hmlUnavailableMessage(base: string, blockers?: HmlBlocker[]): string {
   const detail = blockers
     ?.map((item) => item.message)
     .filter(Boolean)
     .join(' ')
-  return detail
-    ? `This document cannot be saved as HML. ${detail}`
-    : 'This document cannot be saved as HML.'
+  return detail ? `${base} ${detail}` : base
 }

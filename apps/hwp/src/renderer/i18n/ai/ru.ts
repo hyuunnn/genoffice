@@ -51,4 +51,11 @@ export const ru = {
   aiToolStyleTableDone: 'Таблица оформлена',
   aiToolSetPage: 'Параметры страницы',
   aiToolSetPageDone: 'Страница настроена',
+  aiToolReadDocument: 'Текст документа прочитан',
+  aiToolReadSelection: 'Выделение прочитано',
+  aiToolListParagraphs: 'Список абзацев получен',
+  aiToolListFields: 'Список полей получен',
+  aiToolListTables: 'Список таблиц получен',
+  saveErrorDismiss: 'Закрыть',
+  hmlUnavailable: 'Этот документ нельзя сохранить в формате HML.',
 } satisfies Record<keyof typeof zh, string>

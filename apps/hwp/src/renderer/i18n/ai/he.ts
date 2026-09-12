@@ -49,4 +49,11 @@ export const he = {
   aiToolStyleTableDone: 'הטבלה עוצבה',
   aiToolSetPage: 'הגדרת עמוד',
   aiToolSetPageDone: 'העמוד הוגדר',
+  aiToolReadDocument: 'טקסט המסמך נקרא',
+  aiToolReadSelection: 'הבחירה נקראה',
+  aiToolListParagraphs: 'הפסקאות הוצגו',
+  aiToolListFields: 'השדות הוצגו',
+  aiToolListTables: 'הטבלאות הוצגו',
+  saveErrorDismiss: 'סגירה',
+  hmlUnavailable: 'לא ניתן לשמור מסמך זה כ-HML.',
 } satisfies Record<keyof typeof zh, string>

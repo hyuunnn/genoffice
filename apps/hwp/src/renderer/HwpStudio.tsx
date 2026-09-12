@@ -4,6 +4,7 @@ import { HML_UNAVAILABLE } from '../shared/formats'
 import type { PrintMode, SaveMode } from '../shared/ipc'
 import { asBytes } from '../shared/as-bytes'
 import { exportStudioPayload, hmlUnavailableMessage } from './export-payload'
+import { t } from './i18n/locale'
 import { createStudioFacade, fileNameOf, type HangulStudioFacade } from './studio-text'
 
 function notifyStudioResize(host: HTMLElement): void {
@@ -77,7 +78,7 @@ export function HwpStudio({
         if (!result.ok) {
           onSaveErrorRef.current(
             result.error === HML_UNAVAILABLE
-              ? hmlUnavailableMessage(payload.hmlBlockers)
+              ? hmlUnavailableMessage(t('hmlUnavailable'), payload.hmlBlockers)
               : result.error,
           )
         }

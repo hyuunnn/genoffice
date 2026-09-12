@@ -51,4 +51,11 @@ export const ja = {
   aiToolStyleTableDone: '表の体裁を設定しました',
   aiToolSetPage: 'ページ設定',
   aiToolSetPageDone: 'ページを設定しました',
+  aiToolReadDocument: '文書テキストを読み取り',
+  aiToolReadSelection: '選択範囲を読み取り',
+  aiToolListParagraphs: '段落一覧を取得',
+  aiToolListFields: 'フィールド一覧を取得',
+  aiToolListTables: '表一覧を取得',
+  saveErrorDismiss: '閉じる',
+  hmlUnavailable: 'この文書は HML として保存できません。',
 } satisfies Record<keyof typeof zh, string>

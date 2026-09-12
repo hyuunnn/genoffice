@@ -154,6 +154,12 @@ export function AiPanel({
   }
 
   if (!loopRef.current) {
+    /** Studio facade for a tool call; tools before `onReady` fail with a readable error. */
+    const studio = (): HangulStudioFacade => {
+      const facade = facadeRef.current
+      if (!facade) throw new Error('Hangul editor is not ready')
+      return facade
+    }
     const skillDeps = (): HangulSkillDeps => ({
       fileName: () => fileNameOf(filePathRef.current),
       pageCount: () => contextRef.current.pageCount,
@@ -161,81 +167,23 @@ export function AiPanel({
       hasSelection: () => contextRef.current.hasSelection,
       selectionPreview: () => contextRef.current.selectionPreview,
       paragraphPreview: () => contextRef.current.paragraphPreview,
-      getDocumentText: async () => {
-        const studio = facadeRef.current
-        if (!studio) throw new Error('Hangul editor is not ready')
-        return studio.getPlainText()
-      },
-      getSelection: async () => {
-        const studio = facadeRef.current
-        if (!studio) return null
-        return studio.getSelectionText()
-      },
-      replaceParagraph: async (text, index) => {
-        const studio = facadeRef.current
-        if (!studio) throw new Error('Hangul editor is not ready')
-        return studio.replaceParagraph(text, index)
-      },
-      listParagraphs: async () => {
-        const studio = facadeRef.current
-        if (!studio) throw new Error('Hangul editor is not ready')
-        return studio.listParagraphs()
-      },
-      insertContent: async (text, afterIndex) => {
-        const studio = facadeRef.current
-        if (!studio) throw new Error('Hangul editor is not ready')
-        return studio.insertContent(text, afterIndex)
-      },
-      replaceSelection: async (text) => {
-        const studio = facadeRef.current
-        if (!studio) throw new Error('Hangul editor is not ready')
-        return studio.replaceSelection(text)
-      },
-      listFields: async () => {
-        const studio = facadeRef.current
-        if (!studio) throw new Error('Hangul editor is not ready')
-        return studio.listFields()
-      },
-      setField: async (name, value) => {
-        const studio = facadeRef.current
-        if (!studio) throw new Error('Hangul editor is not ready')
-        return studio.setField(name, value)
-      },
-      listTables: async () => {
-        const studio = facadeRef.current
-        if (!studio) throw new Error('Hangul editor is not ready')
-        return studio.listTables()
-      },
-      replaceCell: async (table, row, col, text) => {
-        const studio = facadeRef.current
-        if (!studio) throw new Error('Hangul editor is not ready')
-        return studio.replaceCell(table, row, col, text)
-      },
-      insertTable: async (rows, cols, cells, afterIndex) => {
-        const studio = facadeRef.current
-        if (!studio) throw new Error('Hangul editor is not ready')
-        return studio.insertTable(rows, cols, cells, afterIndex)
-      },
-      applyFormat: async (format, index, indexes, cell) => {
-        const studio = facadeRef.current
-        if (!studio) throw new Error('Hangul editor is not ready')
-        return studio.applyFormat(format, index, indexes, cell)
-      },
-      editTable: async (spec) => {
-        const studio = facadeRef.current
-        if (!studio) throw new Error('Hangul editor is not ready')
-        return studio.editTable(spec)
-      },
-      styleTable: async (spec) => {
-        const studio = facadeRef.current
-        if (!studio) throw new Error('Hangul editor is not ready')
-        return studio.styleTable(spec)
-      },
-      setPage: async (spec) => {
-        const studio = facadeRef.current
-        if (!studio) throw new Error('Hangul editor is not ready')
-        return studio.setPage(spec)
-      },
+      getDocumentText: () => studio().getPlainText(),
+      getSelection: () => studio().getSelectionText(),
+      listParagraphs: () => studio().listParagraphs(),
+      insertContent: (text, afterIndex) => studio().insertContent(text, afterIndex),
+      replaceParagraph: (text, index) => studio().replaceParagraph(text, index),
+      replaceSelection: (text) => studio().replaceSelection(text),
+      listFields: () => studio().listFields(),
+      setField: (name, value) => studio().setField(name, value),
+      listTables: () => studio().listTables(),
+      replaceCell: (table, row, col, text) => studio().replaceCell(table, row, col, text),
+      insertTable: (rows, cols, cells, afterIndex) =>
+        studio().insertTable(rows, cols, cells, afterIndex),
+      applyFormat: (format, index, indexes, cell) =>
+        studio().applyFormat(format, index, indexes, cell),
+      editTable: (spec) => studio().editTable(spec),
+      styleTable: (spec) => studio().styleTable(spec),
+      setPage: (spec) => studio().setPage(spec),
     })
     loopRef.current = new AgentLoop({
       transport: createElectronTransport(() => settingsRef.current!),

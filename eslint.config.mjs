@@ -18,6 +18,8 @@ export default tseslint.config(
       'scripts/drivers/**',
       'apps/*/build/**',
       'packages/*/src/vendor/**',
+      // rhwp-studio snapshot (gitignored, node apps/hwp/scripts/vendor-studio.mjs)
+      'apps/hwp/vendor/**',
     ],
   },
   js.configs.recommended,

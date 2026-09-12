@@ -3184,7 +3184,7 @@ function registerTabsIpc(): void {
       },
       {
         label: tm('menuNewHwp'),
-        icon: menuIcons().docx,
+        icon: menuIcons().hwp,
         click: () => newHwpTab(),
       },
       { type: 'separator' },

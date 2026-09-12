@@ -51,4 +51,11 @@ export const nl = {
   aiToolStyleTableDone: 'Tabel opgemaakt',
   aiToolSetPage: 'Pagina instellen',
   aiToolSetPageDone: 'Pagina ingesteld',
+  aiToolReadDocument: 'Documenttekst gelezen',
+  aiToolReadSelection: 'Selectie gelezen',
+  aiToolListParagraphs: "Alinea's weergegeven",
+  aiToolListFields: 'Velden weergegeven',
+  aiToolListTables: 'Tabellen weergegeven',
+  saveErrorDismiss: 'Sluiten',
+  hmlUnavailable: 'Dit document kan niet als HML worden opgeslagen.',
 } satisfies Record<keyof typeof zh, string>

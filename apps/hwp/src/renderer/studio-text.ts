@@ -3,7 +3,14 @@ export const PLAIN_TEXT_MAX_CHARS = 80_000
 /** Short selection preview attached to every user turn. */
 export const SELECTION_PREVIEW_CHARS = 400
 export const PLAIN_TEXT_UNAVAILABLE = 'plain text unavailable'
-export const PARAGRAPH_PREPARE_UNAVAILABLE = 'paragraph prepare is unavailable'
+/** Studio bundle lacks the patched Document methods (stale snapshot / SDK without `_request`). */
+export const STUDIO_RPC_UNAVAILABLE = 'studio document RPC is unavailable'
+export const PARAGRAPH_SNAPSHOT_INVALID = 'paragraph snapshot is invalid'
+export const FIELD_WRITE_FAILED = 'field write failed'
+/** A list/insert RPC answered with a shape the host cannot read. Never swallow as `[]`. */
+export function invalidRpcResult(method: string): string {
+  return `${method} returned an unexpected result`
+}
 export const PARAGRAPH_NOT_EDITABLE = 'paragraph is not editable'
 export const SELECTION_NOT_IN_PARAGRAPH = 'nothing is selected in this paragraph'
 export const PARAGRAPH_INDEX_OUT_OF_RANGE = 'paragraph index out of range'
@@ -400,12 +407,12 @@ function requestStudio(
   method: string,
   params?: Record<string, unknown>,
 ): Promise<unknown> {
-  if (typeof studio._request !== 'function') throw new Error(PARAGRAPH_PREPARE_UNAVAILABLE)
+  if (typeof studio._request !== 'function') throw new Error(STUDIO_RPC_UNAVAILABLE)
   return studio._request(method, params)
 }
 
 function asPrepared(value: unknown): PreparedParagraph {
-  if (!value || typeof value !== 'object') throw new Error(PARAGRAPH_PREPARE_UNAVAILABLE)
+  if (!value || typeof value !== 'object') throw new Error(PARAGRAPH_SNAPSHOT_INVALID)
   const raw = value as Partial<PreparedParagraph>
   const target = raw.target
   const okTarget =
@@ -446,7 +453,7 @@ async function applyPrepared(
 ): Promise<{ before: string; after: string }> {
   const after = normalizeReplacement(replacement)
   if (!studio.getDocumentState || !studio.applyTextCommand) {
-    throw new Error(PARAGRAPH_PREPARE_UNAVAILABLE)
+    throw new Error(STUDIO_RPC_UNAVAILABLE)
   }
   if (
     !prepared.editable ||
@@ -525,7 +532,7 @@ export async function listBodyParagraphs(
   studio: StudioTextSource,
 ): Promise<HangulParagraphPreview[]> {
   const raw = await requestStudio(studio, 'listBodyParagraphs')
-  if (!Array.isArray(raw)) throw new Error(PARAGRAPH_PREPARE_UNAVAILABLE)
+  if (!Array.isArray(raw)) throw new Error(invalidRpcResult('listBodyParagraphs'))
   return raw.map((item, index) => {
     const prepared = asPrepared(item)
     return {
@@ -545,7 +552,7 @@ export async function replaceParagraphAt(
   replacement: string,
 ): Promise<{ before: string; after: string }> {
   const raw = await requestStudio(studio, 'listBodyParagraphs')
-  if (!Array.isArray(raw)) throw new Error(PARAGRAPH_PREPARE_UNAVAILABLE)
+  if (!Array.isArray(raw)) throw new Error(invalidRpcResult('listBodyParagraphs'))
   if (!raw[index]) throw new Error(PARAGRAPH_INDEX_OUT_OF_RANGE)
   return applyPrepared(studio, asPrepared(raw[index]), replacement)
 }
@@ -576,23 +583,27 @@ async function fillInsertedParagraphs(
   studio: StudioTextSource,
   section: number,
   insertAt: number,
-  writeFrom: number,
   lines: string[],
-): Promise<number> {
+): Promise<void> {
   const inserted = await requestStudio(studio, 'insertFilledParagraphs', {
     section,
     index: insertAt,
     texts: lines,
   })
-  if (!inserted || typeof inserted !== 'object') throw new Error(PARAGRAPH_PREPARE_UNAVAILABLE)
-  return writeFrom
+  if (!inserted || typeof inserted !== 'object') {
+    throw new Error(invalidRpcResult('insertFilledParagraphs'))
+  }
 }
 
+/**
+ * Where new content goes. `fillIndex` is an empty editable paragraph that takes
+ * the first line in place; `insertAt` is the studio paragraph index for the rest;
+ * `writeFrom` is the list index the first inserted paragraph will occupy.
+ */
 async function resolveInsertAnchor(
   studio: StudioTextSource,
   afterIndex?: number,
 ): Promise<{
-  items: HangulParagraphPreview[]
   fillIndex: number | null
   section: number
   insertAt: number
@@ -641,7 +652,7 @@ async function resolveInsertAnchor(
     writeFrom = afterIndex + 1
   }
 
-  return { items, fillIndex, section, insertAt, writeFrom }
+  return { fillIndex, section, insertAt, writeFrom }
 }
 
 export async function insertContent(
@@ -653,28 +664,17 @@ export async function insertContent(
   const { fillIndex, section, insertAt, writeFrom } = await resolveInsertAnchor(studio, afterIndex)
 
   let remaining = lines
-  let start = fillIndex ?? writeFrom
   if (fillIndex != null) {
     await replaceParagraphAt(studio, fillIndex, lines[0]!)
     remaining = lines.slice(1)
   }
+  if (remaining.length > 0) await fillInsertedParagraphs(studio, section, insertAt, remaining)
 
-  if (remaining.length > 0) {
-    const filledStart = await fillInsertedParagraphs(
-      studio,
-      section,
-      insertAt,
-      writeFrom,
-      remaining,
-    )
-    if (fillIndex == null) start = filledStart
-  }
-
-  return { count: lines.length, start }
+  return { count: lines.length, start: fillIndex ?? writeFrom }
 }
 
 function asFields(value: unknown): HangulField[] {
-  if (!Array.isArray(value)) throw new Error(PARAGRAPH_PREPARE_UNAVAILABLE)
+  if (!Array.isArray(value)) throw new Error(invalidRpcResult('listFields'))
   return value
     .map((item) => {
       const raw = item && typeof item === 'object' ? (item as Partial<HangulField>) : {}
@@ -707,14 +707,14 @@ export async function setDocumentField(
     try {
       await studio.hwpctrl.call('PutFieldText', [fieldName, after])
     } catch {
-      throw new Error(current ? PARAGRAPH_PREPARE_UNAVAILABLE : FIELD_NOT_FOUND)
+      throw new Error(current ? FIELD_WRITE_FAILED : FIELD_NOT_FOUND)
     }
   }
   return { name: fieldName, before: current?.value ?? '', after }
 }
 
 function asTables(value: unknown): HangulTable[] {
-  if (!Array.isArray(value)) throw new Error(PARAGRAPH_PREPARE_UNAVAILABLE)
+  if (!Array.isArray(value)) throw new Error(invalidRpcResult('listTables'))
   return value.map((item, index) => {
     const raw = item && typeof item === 'object' ? (item as Record<string, unknown>) : {}
     const cells = Array.isArray(raw.cells)
@@ -1054,7 +1054,7 @@ export async function applyParagraphFormat(
   const applied = formatAppliedLabels(format)
   if (applied.length === 0) throw new Error(FORMAT_EMPTY)
   const raw = await requestStudio(studio, 'listBodyParagraphs')
-  if (!Array.isArray(raw)) throw new Error(PARAGRAPH_PREPARE_UNAVAILABLE)
+  if (!Array.isArray(raw)) throw new Error(invalidRpcResult('listBodyParagraphs'))
   const items = raw.map((item) => asPrepared(item))
   let targets: number[]
   if (indexes != null) {

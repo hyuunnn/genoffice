@@ -49,4 +49,11 @@ export const zhTW = {
   aiToolStyleTableDone: '已設定表格外觀',
   aiToolSetPage: '設定頁面',
   aiToolSetPageDone: '已設定頁面',
+  aiToolReadDocument: '讀取文件文字',
+  aiToolReadSelection: '讀取選取範圍',
+  aiToolListParagraphs: '列出段落',
+  aiToolListFields: '列出欄位',
+  aiToolListTables: '列出表格',
+  saveErrorDismiss: '關閉',
+  hmlUnavailable: '此文件無法儲存為 HML。',
 } satisfies Record<keyof typeof zh, string>

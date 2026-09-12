@@ -52,9 +52,13 @@ describe('exportStudioPayload', () => {
 
 describe('hmlUnavailableMessage', () => {
   it('includes blocker text when present', () => {
-    expect(hmlUnavailableMessage()).toBe('This document cannot be saved as HML.')
+    expect(hmlUnavailableMessage('This document cannot be saved as HML.')).toBe(
+      'This document cannot be saved as HML.',
+    )
     expect(
-      hmlUnavailableMessage([{ code: 'X', xmlPath: '/', message: 'needs HML source' }]),
+      hmlUnavailableMessage('This document cannot be saved as HML.', [
+        { code: 'X', xmlPath: '/', message: 'needs HML source' },
+      ]),
     ).toBe('This document cannot be saved as HML. needs HML source')
   })
 })
