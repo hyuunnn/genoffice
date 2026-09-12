@@ -15,10 +15,11 @@ import {
   PWA_FILES,
   REQUIRED_ASSET_EXTS,
   REQUIRED_RELATIVE,
+  StaleSnapshotError,
+  assertSnapshotCurrent,
   isPwaPath,
   exposePrepareTextCommand,
   keepEmbedNewDoc,
-  stripAbandonedStudioPatches,
   stripPwaHtml,
 } from './studio-snapshot.mjs'
 
@@ -121,10 +122,12 @@ async function stripPwaFiles() {
   await writeFile(index, next)
 }
 
+/** Needle misses are reported and skipped (other assets lack the agent); stale snapshots propagate. */
 function tryStudioPatch(fn, js, label) {
   try {
     return fn(js)
   } catch (err) {
+    if (err instanceof StaleSnapshotError) throw err
     process.stderr.write(
       `studio patch skipped (${label}): ${err instanceof Error ? err.message : err}\n`,
     )
@@ -133,11 +136,8 @@ function tryStudioPatch(fn, js, label) {
 }
 
 function patchStudioSource(js, label) {
-  return tryStudioPatch(
-    exposePrepareTextCommand,
-    tryStudioPatch(keepEmbedNewDoc, stripAbandonedStudioPatches(js), label),
-    label,
-  )
+  assertSnapshotCurrent(js)
+  return tryStudioPatch(exposePrepareTextCommand, tryStudioPatch(keepEmbedNewDoc, js, label), label)
 }
 
 async function patchStudioJs() {
@@ -204,6 +204,7 @@ async function vendor() {
 async function main() {
   if (ENSURE) {
     await stripPwaFiles()
+    // A stale local snapshot is never migrated in place; the error names the re-vendor command.
     await patchStudioJs()
     await ensurePrintHtml()
     if (isComplete()) {

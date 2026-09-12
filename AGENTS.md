@@ -24,6 +24,13 @@ Patch source: `apps/hwp/scripts/studio-snapshot.mjs`. Snapshot output
 `apps/hwp/vendor/rhwp-studio/` is **gitignored**. After vendor or preload
 changes, restart `npm run dev`. Blank pane: `node apps/hwp/scripts/vendor-studio.mjs --ensure` then restart.
 
+The patch is written against the **pristine** upstream bundle only. A snapshot
+is pristine, current, or stale; `--ensure` never migrates a stale one in place —
+it throws `StaleSnapshotError` naming `npm run vendor:studio -w @genoffice/hwp`.
+After changing `studio-snapshot.mjs`, re-vendor; do not add in-place `repair*` /
+`attach*` upgrade paths. Tests run against
+`apps/hwp/tests/fixtures/rhwp-0.8.6-agent-excerpt.txt` (real bundle windows).
+
 Do not `npm install -w @genoffice/hwp` alone. Hangul `src/main` and preload
 compile into the **shell** build.
 
@@ -38,8 +45,9 @@ Do not call Hangul WASM from the host as a bypass.
 
 **Class method lists must not have commas.** Object literals and `switch` cases
 do. A comma between class methods makes the vendor bundle fail to parse — blank
-Hangul page, Enter does nothing. `stripClassMethodCommas()` repairs that. The
-snapshot test locks it.
+Hangul page, Enter does nothing. Class members are built by the `*Method(s)()`
+template functions; handlers by `prepareAgentHandlers()` (comma-joined). The
+snapshot test parses the injected class body to lock it.
 
 Body edits go through `applyTextCommand` (no `\n`, 4000 code-point cap). New
 paragraphs are inserted first, then each is filled. Re-list immediately before
@@ -54,14 +62,13 @@ WASM: `applyCharFormatInCell` / `applyParaFormatInCell` (`apply_format` with
 `setPageDef` / `getColumnDef` / `setColumnDef` (`set_page`). Cell char ranges
 are UTF-16 (`string.length`), matching WASM offsets. `table: 0` is a valid
 index — do not treat it as omitted. After a JS snapshot patch, run
-`node apps/hwp/scripts/vendor-studio.mjs --ensure` and close/reopen the Hangul
-tab.
+`npm run vendor:studio -w @genoffice/hwp` and close/reopen the Hangul tab.
 
 ## Do not
 
 - Lift the 4000-character body cap.
 - Use `SetTextFile` (or any whole-document write) as a general editor.
-- Re-apply page-turn / caret-below-page studio patches (`eb3c4f8` reverted them).
+- Re-apply page-turn / caret-below-page studio patches (`0f06f81` reverted them).
 - Call header/footnote WASM from the host. Undo and layout break.
 - Treat `null` / `''` / whitespace required indexes as `0`.
 - Restore `aiEmptyBody` to “편집 불가”. Every locale’s empty-state line must

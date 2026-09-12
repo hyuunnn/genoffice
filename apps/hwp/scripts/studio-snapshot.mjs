@@ -1,4 +1,12 @@
-/** Shared rhwp-studio snapshot helpers for the vendor script and tests. */
+/**
+ * Shared rhwp-studio snapshot helpers for the vendor script and tests.
+ *
+ * Every patch here is written against the pristine 0.8.6 pages bundle. A
+ * snapshot is either pristine (no `genoffice-*` marks), current (all marks
+ * present and complete), or stale (marks from an older version of this
+ * script). Stale snapshots are never migrated in place — `--ensure` reports
+ * `StaleSnapshotError` and the fix is `npm run vendor:studio -w @genoffice/hwp`.
+ */
 
 export const PWA_FILES = ['sw.js', 'registerSW.js', 'manifest.webmanifest']
 
@@ -23,6 +31,16 @@ export function stripPwaHtml(html) {
   return html.replace(PWA_HTML_RE, '')
 }
 
+/** Thrown when a local snapshot carries marks this script no longer produces. */
+export class StaleSnapshotError extends Error {
+  constructor(detail) {
+    super(
+      `rhwp-studio snapshot is stale (${detail}) — run \`npm run vendor:studio -w @genoffice/hwp\``,
+    )
+    this.name = 'StaleSnapshotError'
+  }
+}
+
 /**
  * Embed mode strips File new/open/save/print from the registry so the host owns
  * those actions — and also skips boot-time `createNewDocument()`. Untitled tabs
@@ -38,21 +56,9 @@ const EMBED_NEW_DOC_RE =
 const EMBED_KEEP_IDS =
   'e.id===`file:new-doc`||e.id===`file:print`||e.id===`file:print-to-pdf`||!sD.includes(e.id)'
 
-const EMBED_NEW_DOC_ONLY_RE =
-  /\/\*genoffice-embed-new-doc\*\/e\.id===`file:new-doc`\|\|!sD\.includes\(e\.id\)/
-
 export function keepEmbedNewDoc(js) {
   if (js.includes(EMBED_PRINT_MARK)) return js
-  if (js.includes(EMBED_NEW_DOC_MARK)) {
-    const upgraded = js.replace(
-      EMBED_NEW_DOC_ONLY_RE,
-      `${EMBED_NEW_DOC_MARK}${EMBED_PRINT_MARK}${EMBED_KEEP_IDS}`,
-    )
-    if (upgraded === js) {
-      throw new Error('rhwp-studio embed command filter changed — update keepEmbedNewDoc()')
-    }
-    return upgraded
-  }
+  if (js.includes(EMBED_NEW_DOC_MARK)) throw new StaleSnapshotError('embed filter lacks print')
   if (!js.includes('file:new-doc') || !js.includes('registerAll')) return js
   const next = js.replace(
     EMBED_NEW_DOC_RE,
@@ -77,13 +83,24 @@ export function hasEmbedPrint(js) {
  * them away. The public SDK cannot add fields there (exactKeys), so expose a
  * sibling prepareTextCommand for the host to bind applyTextCommand.
  */
-export const PREPARE_TEXT_MARK = '/*genoffice-prepare-text*/'
-export const PREPARE_TEXT_V2_MARK = '/*genoffice-prepare-text-v2*/'
-export const PREPARE_TEXT_V3_MARK = '/*genoffice-prepare-text-v3*/'
-export const PREPARE_TEXT_V4_MARK = '/*genoffice-prepare-text-v4*/'
-export const PREPARE_TEXT_V5_MARK = '/*genoffice-prepare-text-v5*/'
-export const PREPARE_TEXT_V6_MARK = '/*genoffice-prepare-text-v6*/'
-export const PREPARE_TEXT_V7_MARK = '/*genoffice-prepare-text-v7*/'
+export const PREPARE_TEXT_MARK = '/*genoffice-prepare-text-v7*/'
+
+/** Marks the current script emits. Any other `genoffice-*` mark means a stale snapshot. */
+const CURRENT_MARKS = new Set([PREPARE_TEXT_MARK, EMBED_NEW_DOC_MARK, EMBED_PRINT_MARK])
+const GENOFFICE_MARK_RE = /\/\*genoffice-[a-z0-9-]+\*\//g
+
+export function staleMarks(js) {
+  const seen = new Set()
+  for (const match of js.matchAll(GENOFFICE_MARK_RE)) {
+    if (!CURRENT_MARKS.has(match[0])) seen.add(match[0])
+  }
+  return [...seen]
+}
+
+export function assertSnapshotCurrent(js) {
+  const stale = staleMarks(js)
+  if (stale.length) throw new StaleSnapshotError(`legacy marks ${stale.join(', ')}`)
+}
 
 const PREPARE_SNAP_RE = /try\{([A-Za-z_$][\w$]*)\(this\.deps\.wasm,i\),this\.currentFormat\(\)/
 const PREPARE_CLASS_RE =
@@ -92,22 +109,12 @@ const PREPARE_HANDLER_RE =
   /async getSelectionContext\(\)\{if\(await ([A-Za-z_$][\w$]*),!([A-Za-z_$][\w$]*)\)throw Error\(`Document agent is not initialized`\);return \2\.getSelectionContext\(\)\},async applyTextCommand\(/
 const PREPARE_ROUTE_RE =
   /case`getSelectionContext`:return ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),`getSelectionContext params`\),([A-Za-z_$][\w$]*)\.getSelectionContext\(\);case`applyTextCommand`:/
-const PREPARE_V1_CLASS_RE =
-  /\/\*genoffice-prepare-text\*\/prepareTextCommand\(\)\{[\s\S]*?\}\}async applyTextCommand\(([A-Za-z_$][\w$]*)\)\{/
-const PREPARE_V1_ROUTE_RE =
-  /case`getSelectionContext`:return ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),`getSelectionContext params`\),([A-Za-z_$][\w$]*)\.getSelectionContext\(\);case`prepareTextCommand`:return \3\.prepareTextCommand\(\);case`applyTextCommand`:/
-const SET_FIELD_CLASS_RE =
-  /setField\(e,t\)\{this\.syncGeneration\(\);return this\.deps\.wasm\.setFieldValueByName\([^;]+\)\}async applyTextCommand/
-const SET_FIELD_HANDLER_RE =
-  /async setField\(e,t\)\{if\(await ([A-Za-z_$][\w$]*),!([A-Za-z_$][\w$]*)\)throw Error\(`Document agent is not initialized`\);return \2\.setField\(e,t\)\},async applyTextCommand\(/
-const SET_FIELD_ROUTE_RE =
-  /case`setField`:return ([A-Za-z_$][\w$]*)\.setField\(([A-Za-z_$][\w$]*)\.name,\2\.value\);case`applyTextCommand`:/
 
 /** Per-paragraph table-control scan cap. Controls past this index are skipped. */
 const TABLE_CONTROLS_PER_PARA = 8
 
-const INSERT_SPLIT_NEEDLE =
-  'insertBodyParagraphs(e,t,n){this.syncGeneration();let r=this.deps.wasm,i=Number(n);if(!Number.isInteger(e)||!Number.isInteger(t)||!Number.isInteger(i)||i<1)throw Error(`insert count must be a positive integer`);let s=r.getParagraphCount(e);'
+// Document class methods. These are class members: NO commas between them.
+// A comma here is a SyntaxError — blank Hangul page, Enter does nothing.
 
 function insertBodyMethod() {
   // WasmBridge has splitParagraph (Enter) but not insertParagraph.
@@ -141,481 +148,109 @@ function formatAgentMethods() {
   return `insertTable(e,t,n,r){this.syncGeneration();let i=Number(n),s=Number(r);if(!Number.isInteger(e)||!Number.isInteger(t)||!Number.isInteger(i)||!Number.isInteger(s)||i<1||s<1)throw Error(\`table size must be positive integers\`);if(i>20||s>10)throw Error(\`table is too large\`);let a=this.deps.wasm.createTable(e,t,0,i,s);if(typeof a==\`string\`)try{a=JSON.parse(a)}catch{}if(a&&a.ok===!1)throw Error(String(a.error||a.message||\`createTable failed\`));return{section:e,paragraph:Number(a?.paraIdx??t),control:Number(a?.controlIdx??0),rows:i,cols:s}}${charFormatMethod()}applyBodyParaFormat(e,t,n){this.syncGeneration();let r=n&&typeof n==\`object\`?Object.assign({},n):{};if(r.headType===\`Bullet\`){r.numberingId=this.deps.wasm.ensureDefaultBullet(r.bulletChar||\`●\`);r.paraLevel=0;delete r.bulletChar}else if(r.headType===\`Number\`){r.numberingId=this.deps.wasm.ensureDefaultNumbering();r.paraLevel=0}let i=this.deps.wasm.applyParaFormat(e,t,JSON.stringify(r));if(typeof i==\`string\`)try{i=JSON.parse(i)}catch{}if(i&&i.ok===!1)throw Error(String(i.error||i.message||\`applyParaFormat failed\`));return i}${cellFormatMethods()}${tableEditMethods()}`
 }
 
-function insertAgentMethod() {
-  return `${insertBodyMethod()}${insertFilledMethod()}${formatAgentMethods()}`
-}
-
 function replaceCellMethod() {
   // Deferred cell replace patches the page tree; a burst of fills traps WASM.
   return `replaceCell(e,t,n,r,i){this.syncGeneration();let a=this.deps.wasm,o=Number(a.getCellParagraphLength(e,t,n,r,0))||0;if(o>0){let d=a.deleteTextInCell(e,t,n,r,0,0,o);if(typeof d==\`string\`)try{d=JSON.parse(d)}catch{}if(d&&d.ok===!1)throw Error(String(d.error||d.message||\`deleteTextInCell failed\`))}let x=String(i??\`\`);if(!x)return{ok:!0};let s=a.insertTextInCell(e,t,n,r,0,0,x);if(typeof s==\`string\`)try{s=JSON.parse(s)}catch{}if(s&&s.ok===!1)throw Error(String(s.error||s.message||\`insertTextInCell failed\`));return s}`
 }
 
 function tableAgentMethods() {
-  return `listTables(){this.syncGeneration();let e=this.deps.wasm,t=[];for(let n=0;n<e.getSectionCount();n+=1)for(let r=0;r<e.getParagraphCount(n);r+=1)for(let i=0;i<${TABLE_CONTROLS_PER_PARA};i+=1){let a;try{a=e.getTableDimensions(n,r,i);if(typeof a==\`string\`)a=JSON.parse(a)}catch{continue}if(!a||!a.rowCount)continue;let o=[],s=Number(a.cellCount||0);for(let c=0;c<s;c+=1){try{let l=e.getCellInfo(n,r,i,c);if(typeof l==\`string\`)l=JSON.parse(l);let u=e.getCellParagraphCount(n,r,i,c),d=[];for(let f=0;f<u;f+=1){let p=e.getCellParagraphLength(n,r,i,c,f);d.push(p>0?e.getTextInCell(n,r,i,c,f,0,p):\`\`)}o.push({index:c,row:l.row,col:l.col,text:d.join(\`\\n\`)})}catch{}}t.push({section:n,paragraph:r,control:i,rows:a.rowCount,cols:a.colCount,cells:o})}return t}${replaceCellMethod()}${insertAgentMethod()}`
+  return `listTables(){this.syncGeneration();let e=this.deps.wasm,t=[];for(let n=0;n<e.getSectionCount();n+=1)for(let r=0;r<e.getParagraphCount(n);r+=1)for(let i=0;i<${TABLE_CONTROLS_PER_PARA};i+=1){let a;try{a=e.getTableDimensions(n,r,i);if(typeof a==\`string\`)a=JSON.parse(a)}catch{continue}if(!a||!a.rowCount)continue;let o=[],s=Number(a.cellCount||0);for(let c=0;c<s;c+=1){try{let l=e.getCellInfo(n,r,i,c);if(typeof l==\`string\`)l=JSON.parse(l);let u=e.getCellParagraphCount(n,r,i,c),d=[];for(let f=0;f<u;f+=1){let p=e.getCellParagraphLength(n,r,i,c,f);d.push(p>0?e.getTextInCell(n,r,i,c,f,0,p):\`\`)}o.push({index:c,row:l.row,col:l.col,text:d.join(\`\\n\`)})}catch{}}t.push({section:n,paragraph:r,control:i,rows:a.rowCount,cols:a.colCount,cells:o})}return t}${replaceCellMethod()}${insertBodyMethod()}${insertFilledMethod()}${formatAgentMethods()}`
 }
 
-/** A missing `}` here leaves listBodyParagraphs inside prepareTextCommand — blank Hangul page. */
-const UNCLOSED_PREPARE_RE = /selectionEnd:i\}\}listBodyParagraphs\(\)\{this\.syncGeneration\(\)/
-
-function closePrepareTextCommand(js) {
-  return js.replace(
-    UNCLOSED_PREPARE_RE,
-    'selectionEnd:i}}}listBodyParagraphs(){this.syncGeneration()',
-  )
+function prepareAgentMethods(snap) {
+  return `${PREPARE_TEXT_MARK}prepareTextCommand(){let e=this.getSelectionContext(),n=this.deps.input.getSelection(),r=null,i=null;if(e.target&&n&&n.start&&n.end&&n.start.sectionIndex===e.target.section&&n.start.paragraphIndex===e.target.paragraph&&n.end.sectionIndex===e.target.section&&n.end.paragraphIndex===e.target.paragraph&&n.end.charOffset>n.start.charOffset){r=n.start.charOffset,i=n.end.charOffset}if(!e.editable||!e.target)return{editable:!1,reason:\`not_editable\`,target:e.target,text:null,textSha256:null,formatSha256:null,adjacentContextSha256:null,selectionStart:r,selectionEnd:i};try{let t=${snap}(this.deps.wasm,e.target);return{editable:!0,reason:null,target:e.target,text:t.text,textSha256:t.textSha256,formatSha256:t.formatSha256,adjacentContextSha256:t.adjacentContextSha256,selectionStart:r,selectionEnd:i}}catch(a){return{editable:!1,reason:String(a&&a.message||a),target:e.target,text:null,textSha256:null,formatSha256:null,adjacentContextSha256:null,selectionStart:r,selectionEnd:i}}}listBodyParagraphs(){this.syncGeneration();let e=this.deps.wasm,t=[];for(let n=0;n<e.getSectionCount();n+=1)for(let r=0;r<e.getParagraphCount(n);r+=1){let i=e.getParagraphLength(n,r),a={kind:\`body_paragraph\`,section:n,paragraph:r,charOffset:0,length:i};try{let o=${snap}(e,a);t.push({editable:!0,reason:null,target:a,text:o.text,textSha256:o.textSha256,formatSha256:o.formatSha256,adjacentContextSha256:o.adjacentContextSha256})}catch(s){t.push({editable:!1,reason:String(s&&s.message||s),target:a,text:null,textSha256:null,formatSha256:null,adjacentContextSha256:null})}}return t}listFields(){this.syncGeneration();let e=this.deps.wasm.getFieldList();if(typeof e==\`string\`)try{e=JSON.parse(e)}catch{e=[]}if(!Array.isArray(e))return[];return e.map(t=>{let n=t&&(t.name||t.fieldName||t.fieldId||t.id)||\`\`,r=\`\`;if(n)try{let i=this.deps.wasm.getFieldValueByName(n);r=typeof i==\`string\`?i:i==null?\`\`:String(i)}catch{}return{name:n,value:r,type:t&&t.fieldType||null}}).filter(t=>t.name)}setField(e,t){this.syncGeneration();return this.deps.wasm.setFieldValueByName(String(e??\`\`),String(t??\`\`))}${tableAgentMethods()}`
 }
 
-/** `a&&a.x??y` is a SyntaxError — blanks the Hangul iframe and blocks AI send. */
-function repairIllegalNullishMix(js) {
-  return js
-    .replace(/Number\(a&&a\.paraIdx\?\?t\)/g, 'Number(a?.paraIdx??t)')
-    .replace(/Number\(a&&a\.controlIdx\?\?0\)/g, 'Number(a?.controlIdx??0)')
+// Document-agent handler object literal (commas required) and RPC switch cases.
+
+function guarded(ready, agent, name, params) {
+  return `async ${name}(${params}){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.${name}(${params})}`
 }
 
-/**
- * stripClassMethodCommas used to also eat the object-literal comma before the
- * insertFilled handler (`}async insertFilled…{if(await`). That is
- * `Unexpected token 'async'` — blank Hangul page, AI never becomes ready.
- */
-const STRIPPED_FILLED_HANDLER_RE = /\}async insertFilledParagraphs\(e,t,n\)\{if\(await /g
+const HANDLER_SIGNATURES = [
+  ['getSelectionContext', ''],
+  ['prepareTextCommand', ''],
+  ['listBodyParagraphs', ''],
+  ['listFields', ''],
+  ['setField', 'e,t'],
+  ['listTables', ''],
+  ['replaceCell', 'e,t,n,r,i'],
+  ['insertBodyParagraphs', 'e,t,n'],
+  ['insertFilledParagraphs', 'e,t,n'],
+  ['insertTable', 'e,t,n,r'],
+  ['applyBodyCharFormat', 'e,t,n,r,i'],
+  ['applyBodyParaFormat', 'e,t,n'],
+  ['applyCellCharFormat', 'e,t,n,r,i,a,o,s'],
+  ['applyCellParaFormat', 'e,t,n,r,i,a'],
+  ['insertTableRow', 'e,t,n,r,i'],
+  ['insertTableColumn', 'e,t,n,r,i'],
+  ['deleteTableRow', 'e,t,n,r'],
+  ['deleteTableColumn', 'e,t,n,r'],
+  ['mergeTableCells', 'e,t,n,r,i,a,o'],
+  ['splitTableCellInto', 'e,t,n,r,i,a,o,s,c'],
+  ['setCellProperties', 'e,t,n,r,i'],
+  ['setTableProperties', 'e,t,n,r'],
+  ['getTableProperties', 'e,t,n'],
+  ['getPageDef', 'e'],
+  ['setPageDef', 'e,t'],
+  ['getColumnDef', 'e'],
+  ['setColumnDef', 'e,t,n,r,i'],
+]
 
-function repairStrippedFilledHandlerComma(js) {
-  return js.replace(STRIPPED_FILLED_HANDLER_RE, '},async insertFilledParagraphs(e,t,n){if(await ')
-}
-
-/** WASM apply*Format encodes a JSON string; a raw object traps as OOB. */
-function repairFormatJsonStringify(js) {
-  return js
-    .replace(
-      /this\.deps\.wasm\.applyCharFormat\(e,t,n,r,a\)/g,
-      'this.deps.wasm.applyCharFormat(e,t,n,r,JSON.stringify(a))',
-    )
-    .replace(
-      /this\.deps\.wasm\.applyParaFormat\(e,t,r\)/g,
-      'this.deps.wasm.applyParaFormat(e,t,JSON.stringify(r))',
-    )
-}
-
-const DEFERRED_REPLACE_CELL_RE =
-  /replaceCell\(e,t,n,r,i\)\{this\.syncGeneration\(\);let a=this\.deps\.wasm,o=a\.getCellParagraphLength\(e,t,n,r,0\),s=a\.replaceTextInCellDeferredPagination\(e,t,n,r,0,0,o,String\(i\?\?``\)\);if\(typeof s==`string`\)try\{s=JSON\.parse\(s\)\}catch\{\}return s\}/
-
-function repairDeferredCellWrite(js) {
-  return js.replace(DEFERRED_REPLACE_CELL_RE, replaceCellMethod())
-}
-
-const SWALLOWED_CELL_LENGTH_RE =
-  /let a=this\.deps\.wasm,o=0;try\{o=a\.getCellParagraphLength\(e,t,n,r,0\)\}catch\{o=0\}o=Number\(o\)\|\|0;/
-
-function repairSwallowedCellLength(js) {
-  return js.replace(
-    SWALLOWED_CELL_LENGTH_RE,
-    'let a=this.deps.wasm,o=Number(a.getCellParagraphLength(e,t,n,r,0))||0;',
-  )
-}
-
-function repairTableInsertOffset(js) {
-  return js.replace(
-    /let o=0;try\{o=Number\(this\.deps\.wasm\.getParagraphLength\(e,t\)\)\|\|0\}catch\{o=0\}let a=this\.deps\.wasm\.createTable\(e,t,o,i,s\)/,
-    'let a=this.deps.wasm.createTable(e,t,0,i,s)',
-  )
-}
-
-const BROKEN_INSERT_HANDLER_RE =
-  /async insertBodyParagraphs\(e\)\{if\(await ([A-Za-z_$][\w$]*),!([A-Za-z_$][\w$]*)\)throw Error\(`Document agent is not initialized`\);return \2\.insertBodyParagraphs\(e\.section,e\.index,e\.count\)\}/
-
-const INSERT_CLASS_METHOD_RE =
-  /insertBodyParagraphs\(e,t,n\)\{this\.syncGeneration\(\);[\s\S]*?return\{section:e,index:t,count:i\}\}/
-
-function repairInsertWasmCall(js) {
-  if (js.includes(INSERT_SPLIT_NEEDLE)) return js
-  if (!INSERT_CLASS_METHOD_RE.test(js)) return js
-  return js.replace(INSERT_CLASS_METHOD_RE, insertAgentMethod())
-}
-
-function repairInsertHandler(js) {
-  return js.replace(
-    BROKEN_INSERT_HANDLER_RE,
-    (_, ready, agent) =>
-      `async insertBodyParagraphs(e,t,n){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.insertBodyParagraphs(e,t,n)}`,
-  )
-}
-
-function insertHandler(ready, agent) {
-  return `async insertBodyParagraphs(e,t,n){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.insertBodyParagraphs(e,t,n)},async insertFilledParagraphs(e,t,n){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.insertFilledParagraphs(e,t,n)},${formatHandler(ready, agent)}`
-}
-
-function formatHandler(ready, agent) {
-  return `async insertTable(e,t,n,r){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.insertTable(e,t,n,r)},async applyBodyCharFormat(e,t,n,r,i){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.applyBodyCharFormat(e,t,n,r,i)},async applyBodyParaFormat(e,t,n){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.applyBodyParaFormat(e,t,n)},async applyCellCharFormat(e,t,n,r,i,a,o,s){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.applyCellCharFormat(e,t,n,r,i,a,o,s)},async applyCellParaFormat(e,t,n,r,i,a){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.applyCellParaFormat(e,t,n,r,i,a)},${tableEditHandler(ready, agent)}`
+function prepareAgentHandlers(ready, agent) {
+  const handlers = HANDLER_SIGNATURES.map(([name, params]) => guarded(ready, agent, name, params))
+  return `${handlers.join(',')},async applyTextCommand(`
 }
 
 function tableEditRoutes(host, params) {
   return `case\`insertTableRow\`:return ${host}.insertTableRow(${params}.section,${params}.paragraph,${params}.control,${params}.row,${params}.after);case\`insertTableColumn\`:return ${host}.insertTableColumn(${params}.section,${params}.paragraph,${params}.control,${params}.col,${params}.after);case\`deleteTableRow\`:return ${host}.deleteTableRow(${params}.section,${params}.paragraph,${params}.control,${params}.row);case\`deleteTableColumn\`:return ${host}.deleteTableColumn(${params}.section,${params}.paragraph,${params}.control,${params}.col);case\`mergeTableCells\`:return ${host}.mergeTableCells(${params}.section,${params}.paragraph,${params}.control,${params}.startRow,${params}.startCol,${params}.endRow,${params}.endCol);case\`splitTableCellInto\`:return ${host}.splitTableCellInto(${params}.section,${params}.paragraph,${params}.control,${params}.row,${params}.col,${params}.rows,${params}.cols,${params}.equalHeight,${params}.mergeFirst);case\`setCellProperties\`:return ${host}.setCellProperties(${params}.section,${params}.paragraph,${params}.control,${params}.cellIndex,${params}.props);case\`setTableProperties\`:return ${host}.setTableProperties(${params}.section,${params}.paragraph,${params}.control,${params}.props);case\`getTableProperties\`:return ${host}.getTableProperties(${params}.section,${params}.paragraph,${params}.control);case\`getPageDef\`:return ${host}.getPageDef(${params}.section);case\`setPageDef\`:return ${host}.setPageDef(${params}.section,${params}.props);case\`getColumnDef\`:return ${host}.getColumnDef(${params}.section);case\`setColumnDef\`:return ${host}.setColumnDef(${params}.section,${params}.count,${params}.columnType,${params}.sameWidth,${params}.spacing);`
 }
 
-function tableEditHandler(ready, agent) {
-  return `async insertTableRow(e,t,n,r,i){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.insertTableRow(e,t,n,r,i)},async insertTableColumn(e,t,n,r,i){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.insertTableColumn(e,t,n,r,i)},async deleteTableRow(e,t,n,r){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.deleteTableRow(e,t,n,r)},async deleteTableColumn(e,t,n,r){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.deleteTableColumn(e,t,n,r)},async mergeTableCells(e,t,n,r,i,a,o){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.mergeTableCells(e,t,n,r,i,a,o)},async splitTableCellInto(e,t,n,r,i,a,o,s,c){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.splitTableCellInto(e,t,n,r,i,a,o,s,c)},async setCellProperties(e,t,n,r,i){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.setCellProperties(e,t,n,r,i)},async setTableProperties(e,t,n,r){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.setTableProperties(e,t,n,r)},async getTableProperties(e,t,n){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.getTableProperties(e,t,n)},async getPageDef(e){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.getPageDef(e)},async setPageDef(e,t){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.setPageDef(e,t)},async getColumnDef(e){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.getColumnDef(e)},async setColumnDef(e,t,n,r,i){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.setColumnDef(e,t,n,r,i)}`
-}
-
-function prepareSurfaceComplete(js) {
-  return (
-    js.includes(PREPARE_TEXT_V7_MARK) &&
-    js.includes('findOrCreateFontId(String(a.fontName))') &&
-    js.includes(INSERT_SPLIT_NEEDLE) &&
-    js.includes('async insertFilledParagraphs(e,t,n){') &&
-    js.includes('case`insertFilledParagraphs`') &&
-    js.includes('case`insertTable`') &&
-    js.includes('case`applyBodyCharFormat`') &&
-    js.includes('case`applyCellCharFormat`') &&
-    js.includes('case`insertTableRow`') &&
-    js.includes('case`setPageDef`') &&
-    js.includes('insertTableRow(e,t,n,r,i){') &&
-    js.includes('insertTable(e,t,n,r){') &&
-    js.includes('applyCharFormatInCell(e,t,n,r,i,a,o,JSON.stringify(c))') &&
-    js.includes('applyParaFormatInCell(e,t,n,r,i,JSON.stringify(p))') &&
-    js.includes('Number(a?.paraIdx??t)') &&
-    !js.includes('a&&a.paraIdx??t') &&
-    js.includes('applyCharFormat(e,t,n,r,JSON.stringify(a))') &&
-    js.includes('applyParaFormat(e,t,JSON.stringify(r))') &&
-    js.includes('insertTextInCell(e,t,n,r,0,0,x)') &&
-    js.includes('o=Number(a.getCellParagraphLength(e,t,n,r,0))||0') &&
-    !js.includes('try{o=a.getCellParagraphLength(e,t,n,r,0)}catch{o=0}') &&
-    !js.includes('replaceTextInCellDeferredPagination(e,t,n,r,0,0,o,String') &&
-    js.includes('r.splitParagraph(e,') &&
-    !js.includes('r.insertParagraph(e,t+a)') &&
-    !js.includes('insertBodyParagraphs(e.section,e.index,e.count)') &&
-    js.includes('},async insertFilledParagraphs(e,t,n){if(await') &&
-    !js.includes('}async insertFilledParagraphs(e,t,n){if(await') &&
-    !/,listBodyParagraphs\(\)\{this\.syncGeneration\(\)/.test(js) &&
-    !/,insertBodyParagraphs\(e,t,n\)\{this\.syncGeneration\(\)/.test(js) &&
-    !/,insertTable\(e,t,n,r\)\{/.test(js) &&
-    !UNCLOSED_PREPARE_RE.test(js)
-  )
-}
-
-function prepareAgentMethods(snap) {
-  return `${PREPARE_TEXT_V7_MARK}prepareTextCommand(){let e=this.getSelectionContext(),n=this.deps.input.getSelection(),r=null,i=null;if(e.target&&n&&n.start&&n.end&&n.start.sectionIndex===e.target.section&&n.start.paragraphIndex===e.target.paragraph&&n.end.sectionIndex===e.target.section&&n.end.paragraphIndex===e.target.paragraph&&n.end.charOffset>n.start.charOffset){r=n.start.charOffset,i=n.end.charOffset}if(!e.editable||!e.target)return{editable:!1,reason:\`not_editable\`,target:e.target,text:null,textSha256:null,formatSha256:null,adjacentContextSha256:null,selectionStart:r,selectionEnd:i};try{let t=${snap}(this.deps.wasm,e.target);return{editable:!0,reason:null,target:e.target,text:t.text,textSha256:t.textSha256,formatSha256:t.formatSha256,adjacentContextSha256:t.adjacentContextSha256,selectionStart:r,selectionEnd:i}}catch(a){return{editable:!1,reason:String(a&&a.message||a),target:e.target,text:null,textSha256:null,formatSha256:null,adjacentContextSha256:null,selectionStart:r,selectionEnd:i}}}listBodyParagraphs(){this.syncGeneration();let e=this.deps.wasm,t=[];for(let n=0;n<e.getSectionCount();n+=1)for(let r=0;r<e.getParagraphCount(n);r+=1){let i=e.getParagraphLength(n,r),a={kind:\`body_paragraph\`,section:n,paragraph:r,charOffset:0,length:i};try{let o=${snap}(e,a);t.push({editable:!0,reason:null,target:a,text:o.text,textSha256:o.textSha256,formatSha256:o.formatSha256,adjacentContextSha256:o.adjacentContextSha256})}catch(s){t.push({editable:!1,reason:String(s&&s.message||s),target:a,text:null,textSha256:null,formatSha256:null,adjacentContextSha256:null})}}return t}listFields(){this.syncGeneration();let e=this.deps.wasm.getFieldList();if(typeof e==\`string\`)try{e=JSON.parse(e)}catch{e=[]}if(!Array.isArray(e))return[];return e.map(t=>{let n=t&&(t.name||t.fieldName||t.fieldId||t.id)||\`\`,r=\`\`;if(n)try{let i=this.deps.wasm.getFieldValueByName(n);r=typeof i==\`string\`?i:i==null?\`\`:String(i)}catch{}return{name:n,value:r,type:t&&t.fieldType||null}}).filter(t=>t.name)}setField(e,t){this.syncGeneration();return this.deps.wasm.setFieldValueByName(String(e??\`\`),String(t??\`\`))}${tableAgentMethods()}`
-}
-
-function prepareAgentHandlers(ready, agent) {
-  return `async getSelectionContext(){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.getSelectionContext()},async prepareTextCommand(){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.prepareTextCommand()},async listBodyParagraphs(){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.listBodyParagraphs()},async listFields(){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.listFields()},async setField(e,t){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.setField(e,t)},async listTables(){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.listTables()},async replaceCell(e,t,n,r,i){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.replaceCell(e,t,n,r,i)},${insertHandler(ready, agent)},async applyTextCommand(`
-}
-
 function prepareAgentRoutes(guard, params, host) {
   return `case\`getSelectionContext\`:return ${guard}(${params},\`getSelectionContext params\`),${host}.getSelectionContext();case\`prepareTextCommand\`:return ${host}.prepareTextCommand();case\`listBodyParagraphs\`:return ${host}.listBodyParagraphs();case\`listFields\`:return ${host}.listFields();case\`setField\`:return ${host}.setField(${params}.name,${params}.value);case\`listTables\`:return ${host}.listTables();case\`replaceCell\`:return ${host}.replaceCell(${params}.section,${params}.paragraph,${params}.control,${params}.cellIndex,${params}.text);case\`insertBodyParagraphs\`:return ${host}.insertBodyParagraphs(${params}.section,${params}.index,${params}.count);case\`insertFilledParagraphs\`:return ${host}.insertFilledParagraphs(${params}.section,${params}.index,${params}.texts);case\`insertTable\`:return ${host}.insertTable(${params}.section,${params}.index,${params}.rows,${params}.cols);case\`applyBodyCharFormat\`:return ${host}.applyBodyCharFormat(${params}.section,${params}.paragraph,${params}.start,${params}.end,${params}.format);case\`applyBodyParaFormat\`:return ${host}.applyBodyParaFormat(${params}.section,${params}.paragraph,${params}.format);case\`applyCellCharFormat\`:return ${host}.applyCellCharFormat(${params}.section,${params}.paragraph,${params}.control,${params}.cellIndex,${params}.cellPara,${params}.start,${params}.end,${params}.format);case\`applyCellParaFormat\`:return ${host}.applyCellParaFormat(${params}.section,${params}.paragraph,${params}.control,${params}.cellIndex,${params}.cellPara,${params}.format);${tableEditRoutes(host, params)}case\`applyTextCommand\`:`
 }
 
-function stripClassMethodCommas(js) {
-  return js
-    .replace(
-      /,listBodyParagraphs\(\)\{this\.syncGeneration\(\)/g,
-      'listBodyParagraphs(){this.syncGeneration()',
-    )
-    .replace(/,listFields\(\)\{this\.syncGeneration\(\)/g, 'listFields(){this.syncGeneration()')
-    .replace(/,setField\(e,t\)\{this\.syncGeneration\(\)/g, 'setField(e,t){this.syncGeneration()')
-    .replace(/,listTables\(\)\{this\.syncGeneration\(\)/g, 'listTables(){this.syncGeneration()')
-    .replace(
-      /,replaceCell\(e,t,n,r,i\)\{this\.syncGeneration\(\)/g,
-      'replaceCell(e,t,n,r,i){this.syncGeneration()',
-    )
-    .replace(
-      /,insertBodyParagraphs\(e,t,n\)\{this\.syncGeneration\(\)/g,
-      'insertBodyParagraphs(e,t,n){this.syncGeneration()',
-    )
-    .replace(
-      /,async insertFilledParagraphs\(e,t,n\)\{if\(!Array\.isArray/g,
-      'async insertFilledParagraphs(e,t,n){if(!Array.isArray',
-    )
-    .replace(/,insertTable\(e,t,n,r\)\{/g, 'insertTable(e,t,n,r){')
-    .replace(/,applyBodyCharFormat\(e,t,n,r,i\)\{/g, 'applyBodyCharFormat(e,t,n,r,i){')
-    .replace(/,applyBodyParaFormat\(e,t,n\)\{/g, 'applyBodyParaFormat(e,t,n){')
-    .replace(/,applyCellCharFormat\(e,t,n,r,i,a,o,s\)\{/g, 'applyCellCharFormat(e,t,n,r,i,a,o,s){')
-    .replace(/,applyCellParaFormat\(e,t,n,r,i,a\)\{/g, 'applyCellParaFormat(e,t,n,r,i,a){')
-    .replace(/,insertTableRow\(e,t,n,r,i\)\{/g, 'insertTableRow(e,t,n,r,i){')
-    .replace(/,insertTableColumn\(e,t,n,r,i\)\{/g, 'insertTableColumn(e,t,n,r,i){')
-    .replace(/,deleteTableRow\(e,t,n,r\)\{/g, 'deleteTableRow(e,t,n,r){')
-    .replace(/,deleteTableColumn\(e,t,n,r\)\{/g, 'deleteTableColumn(e,t,n,r){')
-    .replace(/,mergeTableCells\(e,t,n,r,i,a,o\)\{/g, 'mergeTableCells(e,t,n,r,i,a,o){')
-    .replace(
-      /,splitTableCellInto\(e,t,n,r,i,a,o,s,c\)\{/g,
-      'splitTableCellInto(e,t,n,r,i,a,o,s,c){',
-    )
-    .replace(/,setCellProperties\(e,t,n,r,i\)\{/g, 'setCellProperties(e,t,n,r,i){')
-    .replace(/,setTableProperties\(e,t,n,r\)\{/g, 'setTableProperties(e,t,n,r){')
-    .replace(/,getTableProperties\(e,t,n\)\{/g, 'getTableProperties(e,t,n){')
-    .replace(/,getPageDef\(e\)\{/g, 'getPageDef(e){')
-    .replace(/,setPageDef\(e,t\)\{/g, 'setPageDef(e,t){')
-    .replace(/,getColumnDef\(e\)\{/g, 'getColumnDef(e){')
-    .replace(/,setColumnDef\(e,t,n,r,i\)\{/g, 'setColumnDef(e,t,n,r,i){')
-}
+/** Needles proving all three patch sites (class, handlers, routes) landed. */
+const COMPLETE_NEEDLES = [
+  PREPARE_TEXT_MARK,
+  'listBodyParagraphs(){this.syncGeneration()',
+  'setField(e,t){this.syncGeneration()',
+  'listTables(){this.syncGeneration()',
+  'replaceCell(e,t,n,r,i){this.syncGeneration()',
+  'insertBodyParagraphs(e,t,n){this.syncGeneration()',
+  'async insertFilledParagraphs(e,t,n){if(!Array.isArray',
+  'insertTable(e,t,n,r){this.syncGeneration()',
+  'findOrCreateFontId(String(a.fontName))',
+  'applyCharFormatInCell(e,t,n,r,i,a,o,JSON.stringify(c))',
+  'insertTableRow(e,t,n,r,i){this.syncGeneration()',
+  'setColumnDef(e,t,n,r,i){this.syncGeneration()',
+  ...HANDLER_SIGNATURES.map(([name, params]) => `async ${name}(${params}){if(await `),
+  ...HANDLER_SIGNATURES.map(([name]) => `case\`${name}\`:`),
+]
 
-function attachTableSurface(js) {
-  let next = stripClassMethodCommas(js.replace(PREPARE_TEXT_V2_MARK, PREPARE_TEXT_V3_MARK))
-  next = next.replace(
-    SET_FIELD_CLASS_RE,
-    `setField(e,t){this.syncGeneration();return this.deps.wasm.setFieldValueByName(String(e??\`\`),String(t??\`\`))}${tableAgentMethods()}async applyTextCommand`,
-  )
-  next = next.replace(SET_FIELD_HANDLER_RE, (_, ready, agent) => {
-    return `async setField(e,t){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.setField(e,t)},async listTables(){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.listTables()},async replaceCell(e,t,n,r,i){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.replaceCell(e,t,n,r,i)},async applyTextCommand(`
-  })
-  next = next.replace(
-    SET_FIELD_ROUTE_RE,
-    'case`setField`:return $1.setField($2.name,$2.value);case`listTables`:return $1.listTables();case`replaceCell`:return $1.replaceCell($2.section,$2.paragraph,$2.control,$2.cellIndex,$2.text);case`applyTextCommand`:',
-  )
-  return next
-}
-
-const REPLACE_CELL_CLASS_RE =
-  /replaceCell\(e,t,n,r,i\)\{this\.syncGeneration\(\);[\s\S]*?return s\}async applyTextCommand/
-const REPLACE_CELL_HANDLER_RE =
-  /async replaceCell\(e,t,n,r,i\)\{if\(await ([A-Za-z_$][\w$]*),!([A-Za-z_$][\w$]*)\)throw Error\(`Document agent is not initialized`\);return \2\.replaceCell\(e,t,n,r,i\)\},async applyTextCommand\(/
-const REPLACE_CELL_ROUTE_RE =
-  /case`replaceCell`:return ([A-Za-z_$][\w$]*)\.replaceCell\(([A-Za-z_$][\w$]*)\.section,\2\.paragraph,\2\.control,\2\.cellIndex,\2\.text\);case`applyTextCommand`:/
-
-function attachInsertSurface(js) {
-  let next = stripClassMethodCommas(js.replace(PREPARE_TEXT_V3_MARK, PREPARE_TEXT_V4_MARK))
-  next = next.replace(
-    REPLACE_CELL_CLASS_RE,
-    `${replaceCellMethod()}${insertBodyMethod()}async applyTextCommand`,
-  )
-  next = next.replace(REPLACE_CELL_HANDLER_RE, (_, ready, agent) => {
-    return `async replaceCell(e,t,n,r,i){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.replaceCell(e,t,n,r,i)},async insertBodyParagraphs(e,t,n){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.insertBodyParagraphs(e,t,n)},async applyTextCommand(`
-  })
-  next = next.replace(
-    REPLACE_CELL_ROUTE_RE,
-    'case`replaceCell`:return $1.replaceCell($2.section,$2.paragraph,$2.control,$2.cellIndex,$2.text);case`insertBodyParagraphs`:return $1.insertBodyParagraphs($2.section,$2.index,$2.count);case`applyTextCommand`:',
-  )
-  return next
-}
-
-const INSERT_BODY_CLASS_END_RE =
-  /insertBodyParagraphs\(e,t,n\)\{this\.syncGeneration\(\);[\s\S]*?return\{section:e,index:t,count:i\}\}async applyTextCommand/
-const INSERT_BODY_HANDLER_END_RE =
-  /async insertBodyParagraphs\(e,t,n\)\{if\(await ([A-Za-z_$][\w$]*),!([A-Za-z_$][\w$]*)\)throw Error\(`Document agent is not initialized`\);return \2\.insertBodyParagraphs\(e,t,n\)\},async applyTextCommand\(/
-const INSERT_BODY_ROUTE_END_RE =
-  /case`insertBodyParagraphs`:return ([A-Za-z_$][\w$]*)\.insertBodyParagraphs\(([A-Za-z_$][\w$]*)\.section,\2\.index,\2\.count\);case`applyTextCommand`:/
-
-function attachFillSurface(js) {
-  let next = stripClassMethodCommas(js.replace(PREPARE_TEXT_V4_MARK, PREPARE_TEXT_V5_MARK))
-  next = next.replace(
-    INSERT_BODY_CLASS_END_RE,
-    `${insertBodyMethod()}${insertFilledMethod()}async applyTextCommand`,
-  )
-  next = next.replace(INSERT_BODY_HANDLER_END_RE, (_, ready, agent) => {
-    return `async insertBodyParagraphs(e,t,n){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.insertBodyParagraphs(e,t,n)},async insertFilledParagraphs(e,t,n){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.insertFilledParagraphs(e,t,n)},async applyTextCommand(`
-  })
-  next = next.replace(
-    INSERT_BODY_ROUTE_END_RE,
-    'case`insertBodyParagraphs`:return $1.insertBodyParagraphs($2.section,$2.index,$2.count);case`insertFilledParagraphs`:return $1.insertFilledParagraphs($2.section,$2.index,$2.texts);case`applyTextCommand`:',
-  )
-  return next
-}
-
-const INSERT_FILLED_CLASS_END_RE =
-  /async insertFilledParagraphs\(e,t,n\)\{[\s\S]*?return\{section:e,index:t,count:n\.length\}\}async applyTextCommand/
-const INSERT_FILLED_HANDLER_END_RE =
-  /async insertFilledParagraphs\(e,t,n\)\{if\(await ([A-Za-z_$][\w$]*),!([A-Za-z_$][\w$]*)\)throw Error\(`Document agent is not initialized`\);return \2\.insertFilledParagraphs\(e,t,n\)\},async applyTextCommand\(/
-const INSERT_FILLED_ROUTE_END_RE =
-  /case`insertFilledParagraphs`:return ([A-Za-z_$][\w$]*)\.insertFilledParagraphs\(([A-Za-z_$][\w$]*)\.section,\2\.index,\2\.texts\);case`applyTextCommand`:/
-
-function attachFormatSurface(js) {
-  let next = stripClassMethodCommas(js.replace(PREPARE_TEXT_V5_MARK, PREPARE_TEXT_V6_MARK))
-  next = next.replace(
-    INSERT_FILLED_CLASS_END_RE,
-    `${insertFilledMethod()}${formatAgentMethods()}async applyTextCommand`,
-  )
-  next = next.replace(INSERT_FILLED_HANDLER_END_RE, (_, ready, agent) => {
-    return `async insertFilledParagraphs(e,t,n){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.insertFilledParagraphs(e,t,n)},${formatHandler(ready, agent)},async applyTextCommand(`
-  })
-  next = next.replace(
-    INSERT_FILLED_ROUTE_END_RE,
-    `case\`insertFilledParagraphs\`:return $1.insertFilledParagraphs($2.section,$2.index,$2.texts);case\`insertTable\`:return $1.insertTable($2.section,$2.index,$2.rows,$2.cols);case\`applyBodyCharFormat\`:return $1.applyBodyCharFormat($2.section,$2.paragraph,$2.start,$2.end,$2.format);case\`applyBodyParaFormat\`:return $1.applyBodyParaFormat($2.section,$2.paragraph,$2.format);case\`applyCellCharFormat\`:return $1.applyCellCharFormat($2.section,$2.paragraph,$2.control,$2.cellIndex,$2.cellPara,$2.start,$2.end,$2.format);case\`applyCellParaFormat\`:return $1.applyCellParaFormat($2.section,$2.paragraph,$2.control,$2.cellIndex,$2.cellPara,$2.format);${tableEditRoutes('$1', '$2')}case\`applyTextCommand\`:`,
-  )
-  return next
-}
-
-const CHAR_FORMAT_V6_RE =
-  /applyBodyCharFormat\(e,t,n,r,i\)\{this\.syncGeneration\(\);let a=this\.deps\.wasm\.applyCharFormat\(e,t,n,r,i\);if\(typeof a==`string`\)try\{a=JSON\.parse\(a\)\}catch\{\}if\(a&&a\.ok===!1\)throw Error\(String\(a\.error\|\|a\.message\|\|`applyCharFormat failed`\)\);return a\}/
-
-function attachFontSurface(js) {
-  let next = stripClassMethodCommas(js.replace(PREPARE_TEXT_V6_MARK, PREPARE_TEXT_V7_MARK))
-  next = next.replace(CHAR_FORMAT_V6_RE, charFormatMethod())
-  return next
-}
-
-const APPLY_PARA_HANDLER_END_RE =
-  /async applyBodyParaFormat\(e,t,n\)\{if\(await ([A-Za-z_$][\w$]*),!([A-Za-z_$][\w$]*)\)throw Error\(`Document agent is not initialized`\);return \2\.applyBodyParaFormat\(e,t,n\)\},async applyTextCommand\(/
-const APPLY_PARA_ROUTE_END_RE =
-  /case`applyBodyParaFormat`:return ([A-Za-z_$][\w$]*)\.applyBodyParaFormat\(([A-Za-z_$][\w$]*)\.section,\2\.paragraph,\2\.format\);case`applyTextCommand`:/
-
-function attachCellFormatSurface(js) {
-  if (
-    js.includes('applyCharFormatInCell(e,t,n,r,i,a,o,JSON.stringify(c))') &&
-    js.includes('case`applyCellCharFormat`')
-  ) {
-    return js
-  }
-  let next = stripClassMethodCommas(js)
-  next = next.replace(
-    /applyParaFormat failed`\)\);return i\}async applyTextCommand/,
-    `applyParaFormat failed\`));return i}${cellFormatMethods()}async applyTextCommand`,
-  )
-  next = next.replace(APPLY_PARA_HANDLER_END_RE, (_, ready, agent) => {
-    return `async applyBodyParaFormat(e,t,n){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.applyBodyParaFormat(e,t,n)},async applyCellCharFormat(e,t,n,r,i,a,o,s){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.applyCellCharFormat(e,t,n,r,i,a,o,s)},async applyCellParaFormat(e,t,n,r,i,a){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.applyCellParaFormat(e,t,n,r,i,a)},async applyTextCommand(`
-  })
-  next = next.replace(
-    APPLY_PARA_ROUTE_END_RE,
-    `case\`applyBodyParaFormat\`:return $1.applyBodyParaFormat($2.section,$2.paragraph,$2.format);case\`applyCellCharFormat\`:return $1.applyCellCharFormat($2.section,$2.paragraph,$2.control,$2.cellIndex,$2.cellPara,$2.start,$2.end,$2.format);case\`applyCellParaFormat\`:return $1.applyCellParaFormat($2.section,$2.paragraph,$2.control,$2.cellIndex,$2.cellPara,$2.format);${tableEditRoutes('$1', '$2')}case\`applyTextCommand\`:`,
-  )
-  return next
-}
-
-const APPLY_CELL_PARA_HANDLER_END_RE =
-  /async applyCellParaFormat\(e,t,n,r,i,a\)\{if\(await ([A-Za-z_$][\w$]*),!([A-Za-z_$][\w$]*)\)throw Error\(`Document agent is not initialized`\);return \2\.applyCellParaFormat\(e,t,n,r,i,a\)\},async applyTextCommand\(/
-const APPLY_CELL_PARA_ROUTE_END_RE =
-  /case`applyCellParaFormat`:return ([A-Za-z_$][\w$]*)\.applyCellParaFormat\(([A-Za-z_$][\w$]*)\.section,\2\.paragraph,\2\.control,\2\.cellIndex,\2\.cellPara,\2\.format\);case`applyTextCommand`:/
-
-function attachTableEditSurface(js) {
-  if (js.includes('insertTableRow(e,t,n,r,i){') && js.includes('case`setPageDef`')) {
-    return js
-  }
-  let next = stripClassMethodCommas(js)
-  next = next.replace(
-    /applyParaFormatInCell failed`\)\);return x\}async applyTextCommand/,
-    `applyParaFormatInCell failed\`));return x}${tableEditMethods()}async applyTextCommand`,
-  )
-  next = next.replace(APPLY_CELL_PARA_HANDLER_END_RE, (_, ready, agent) => {
-    return `async applyCellParaFormat(e,t,n,r,i,a){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.applyCellParaFormat(e,t,n,r,i,a)},${tableEditHandler(ready, agent)},async applyTextCommand(`
-  })
-  next = next.replace(
-    APPLY_CELL_PARA_ROUTE_END_RE,
-    `case\`applyCellParaFormat\`:return $1.applyCellParaFormat($2.section,$2.paragraph,$2.control,$2.cellIndex,$2.cellPara,$2.format);${tableEditRoutes('$1', '$2')}case\`applyTextCommand\`:`,
-  )
-  return next
+export function prepareSurfaceComplete(js) {
+  return COMPLETE_NEEDLES.every((needle) => js.includes(needle))
 }
 
 export function exposePrepareTextCommand(js) {
-  const closed = repairSwallowedCellLength(
-    repairTableInsertOffset(
-      repairDeferredCellWrite(
-        repairFormatJsonStringify(
-          repairStrippedFilledHandlerComma(
-            repairIllegalNullishMix(
-              closePrepareTextCommand(repairInsertHandler(repairInsertWasmCall(js))),
-            ),
-          ),
-        ),
-      ),
-    ),
-  )
-  if (prepareSurfaceComplete(closed)) return closed
-  if (
-    closed.includes(PREPARE_TEXT_V7_MARK) ||
-    closed.includes(PREPARE_TEXT_V6_MARK) ||
-    closed.includes(PREPARE_TEXT_V5_MARK) ||
-    closed.includes(PREPARE_TEXT_V4_MARK) ||
-    closed.includes(PREPARE_TEXT_V3_MARK) ||
-    closed.includes(PREPARE_TEXT_V2_MARK)
-  ) {
-    const upgraded = repairSwallowedCellLength(
-      repairTableInsertOffset(
-        repairDeferredCellWrite(
-          repairFormatJsonStringify(
-            repairStrippedFilledHandlerComma(
-              repairIllegalNullishMix(
-                attachTableEditSurface(
-                  attachCellFormatSurface(
-                    attachFontSurface(
-                      attachFormatSurface(
-                        attachFillSurface(attachInsertSurface(attachTableSurface(closed))),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    )
-    if (
-      !upgraded.includes(PREPARE_TEXT_V7_MARK) ||
-      !upgraded.includes('findOrCreateFontId(String(a.fontName))') ||
-      !upgraded.includes('applyCharFormat(e,t,n,r,JSON.stringify(a))') ||
-      upgraded.includes('a&&a.paraIdx??t') ||
-      upgraded.includes('}async insertFilledParagraphs(e,t,n){if(await')
-    ) {
-      throw new Error(
-        'rhwp-studio prepareTextCommand surface changed — update exposePrepareTextCommand()',
-      )
-    }
-    if (
-      closed.includes('applyParaFormat(e,t,JSON.stringify(r))') &&
-      (!upgraded.includes('applyCharFormatInCell(e,t,n,r,i,a,o,JSON.stringify(c))') ||
-        !upgraded.includes('case`applyCellCharFormat`'))
-    ) {
-      throw new Error('rhwp-studio cell format surface changed — update attachCellFormatSurface()')
-    }
-    if (
-      closed.includes('applyCharFormatInCell(e,t,n,r,i,a,o,JSON.stringify(c))') &&
-      (!upgraded.includes('insertTableRow(e,t,n,r,i){') || !upgraded.includes('case`setPageDef`'))
-    ) {
-      throw new Error('rhwp-studio table-edit surface changed — update attachTableEditSurface()')
-    }
-    return upgraded
+  if (prepareSurfaceComplete(js)) return js
+  if (js.includes(PREPARE_TEXT_MARK)) {
+    throw new StaleSnapshotError('prepareTextCommand surface is incomplete')
   }
   const snap = js.match(PREPARE_SNAP_RE)
-  if (!snap)
+  if (!snap) {
     throw new Error(
       'rhwp-studio paragraph snapshot helper changed — update exposePrepareTextCommand()',
     )
-  const methods = prepareAgentMethods(snap[1])
-  let next = js
-  if (PREPARE_V1_CLASS_RE.test(next)) {
-    next = next.replace(PREPARE_V1_CLASS_RE, `${methods}async applyTextCommand($1){`)
-  } else {
-    next = next.replace(
+  }
+  const next = js
+    .replace(
       PREPARE_CLASS_RE,
-      `selectedTextSha256:$1}}${methods}async applyTextCommand($2){`,
+      `selectedTextSha256:$1}}${prepareAgentMethods(snap[1])}async applyTextCommand($2){`,
     )
-  }
-  next = next.replace(PREPARE_HANDLER_RE, (_, ready, agent) => prepareAgentHandlers(ready, agent))
-  if (
-    next.includes('async prepareTextCommand(){if(await') &&
-    !next.includes('async listBodyParagraphs(){if(await')
-  ) {
-    next = next.replace(
-      /async prepareTextCommand\(\)\{if\(await ([A-Za-z_$][\w$]*),!([A-Za-z_$][\w$]*)\)throw Error\(`Document agent is not initialized`\);return \2\.prepareTextCommand\(\)\},async applyTextCommand\(/,
-      (_, ready, agent) =>
-        `async prepareTextCommand(){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.prepareTextCommand()},async listBodyParagraphs(){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.listBodyParagraphs()},async listFields(){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.listFields()},async setField(e,t){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.setField(e,t)},async listTables(){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.listTables()},async replaceCell(e,t,n,r,i){if(await ${ready},!${agent})throw Error(\`Document agent is not initialized\`);return ${agent}.replaceCell(e,t,n,r,i)},${insertHandler(ready, agent)},async applyTextCommand(`,
-    )
-  }
-  next = next.replace(PREPARE_ROUTE_RE, (_, guard, params, host) =>
-    prepareAgentRoutes(guard, params, host),
-  )
-  if (PREPARE_V1_ROUTE_RE.test(next) && !next.includes('case`listBodyParagraphs`')) {
-    next = next.replace(PREPARE_V1_ROUTE_RE, (_, guard, params, host) =>
-      prepareAgentRoutes(guard, params, host),
-    )
-  }
-  if (
-    !next.includes(PREPARE_TEXT_V7_MARK) ||
-    !next.includes('findOrCreateFontId(String(a.fontName))') ||
-    !next.includes('case`listTables`') ||
-    !next.includes('case`setField`') ||
-    !next.includes('case`insertBodyParagraphs`') ||
-    !next.includes('case`insertFilledParagraphs`') ||
-    !next.includes('case`insertTable`') ||
-    !next.includes('case`applyCellCharFormat`') ||
-    !next.includes('case`insertTableRow`') ||
-    !next.includes('case`setPageDef`') ||
-    !next.includes('insertTableRow(e,t,n,r,i){') ||
-    !next.includes('applyCharFormatInCell(e,t,n,r,i,a,o,JSON.stringify(c))') ||
-    !next.includes('Number(a?.paraIdx??t)') ||
-    !next.includes('applyCharFormat(e,t,n,r,JSON.stringify(a))') ||
-    !next.includes('insertTextInCell(e,t,n,r,0,0,x)') ||
-    next.includes('try{o=a.getCellParagraphLength(e,t,n,r,0)}catch{o=0}') ||
-    next.includes('a&&a.paraIdx??t') ||
-    next.includes('}async insertFilledParagraphs(e,t,n){if(await')
-  ) {
+    .replace(PREPARE_HANDLER_RE, (_, ready, agent) => prepareAgentHandlers(ready, agent))
+    .replace(PREPARE_ROUTE_RE, (_, guard, params, host) => prepareAgentRoutes(guard, params, host))
+  if (!prepareSurfaceComplete(next)) {
     throw new Error(
       'rhwp-studio prepareTextCommand surface changed — update exposePrepareTextCommand()',
     )
@@ -624,50 +259,5 @@ export function exposePrepareTextCommand(js) {
 }
 
 export function hasPrepareTextCommand(js) {
-  return (
-    js.includes(PREPARE_TEXT_V7_MARK) ||
-    js.includes(PREPARE_TEXT_V6_MARK) ||
-    js.includes(PREPARE_TEXT_V5_MARK) ||
-    js.includes(PREPARE_TEXT_V4_MARK) ||
-    js.includes(PREPARE_TEXT_V3_MARK) ||
-    js.includes(PREPARE_TEXT_V2_MARK) ||
-    js.includes(PREPARE_TEXT_MARK)
-  )
-}
-
-/**
- * Drop abandoned page-turn experiments from a local snapshot. Stock studio
- * behavior is restored; only `file:new-doc` / print stay patched.
- */
-export function stripAbandonedStudioPatches(js) {
-  let next = js
-  next = next.replace(
-    /\/\*genoffice-eager-prefetch\*\/n\(\)/g,
-    'if(typeof r.requestIdleCallback==`function`){this.deferredPrefetchTask={kind:`idle`,id:r.requestIdleCallback(n,{timeout:1e3})};return}this.deferredPrefetchTask={kind:`timeout`,id:window.setTimeout(n,250)}',
-  )
-  next = next.replace(
-    /\/\*genoffice-prefetch-overscan\*\/for\(let e of\[s-2,s-1,c\+1,c\+2\]\)/g,
-    'for(let e of[s-1,c+1])',
-  )
-  next = next.replace(
-    /\/\*genoffice-page-align\*\/n>0\?([A-Za-z_$][\w$]*)\(e,r,o,a\):([A-Za-z_$][\w$]*)\(e,r,o\)/g,
-    'n>0?Math.min($1(e,r,o,a),r+i):Math.max($2(e,r,o),r-i)',
-  )
-  next = next.replace(
-    /flushDeferredPaginationIfNeeded\(`before-navigation`,\/\*genoffice-nav-pagination\*\/!0\)/g,
-    'flushDeferredPaginationIfNeeded(`before-navigation`,!1)',
-  )
-  next = next.replace(
-    /e!==`document-agent-rendered`&&\/\*genoffice-sync-layout\*\/\(typeof e==`string`&&e\.includes\(`deferred-pagination-flush`\)\?this\.refreshPages\(\):this\.refreshPagesForMutation\(\)\)/g,
-    'e!==`document-agent-rendered`&&this.refreshPagesForMutation()',
-  )
-  next = next.replace(
-    /this\.recalcLayout\(\),\/\*genoffice-clamp-scroll\*\/\(\(\)=>\{let e=this\.viewportManager\.getViewportSize\(\),t=Math\.max\(0,this\.virtualScroll\.getTotalHeight\(\)-e\.height\);this\.viewportManager\.getScrollY\(\)>t&&this\.viewportManager\.setScrollTop\(t\)\}\)\(\),this\.cancelPendingTextEditRefresh\(\)/g,
-    'this.recalcLayout(),this.cancelPendingTextEditRefresh()',
-  )
-  next = next.replace(
-    /vp\.call\(this,e\.key===`PageUp`\?-1:1,e\.shiftKey\),\/\*genoffice-caret-after-page\*\/this\.updateCaret\(\);return\}/g,
-    'vp.call(this,e.key===`PageUp`?-1:1,e.shiftKey);return}',
-  )
-  return next
+  return js.includes(PREPARE_TEXT_MARK)
 }
